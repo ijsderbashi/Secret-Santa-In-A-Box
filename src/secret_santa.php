@@ -280,7 +280,7 @@ function createMailer(array $smtpConfig): PHPMailer
         $mail->SMTPAuth   = true;
         $mail->Username   = $smtpConfig['username'];
         $mail->Password   = $smtpConfig['password'];
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
         $mail->SMTPAutoTLS = true;
     } else {
         // No username configured (e.g., MailHog dev) – no auth, no TLS
