@@ -4,9 +4,10 @@
 // - Auth: via ?key=wish_key in URL
 // - Shows recipient's wishes for the current year
 // - Allows user to edit an expandable wishlist
-// - When the wishlist is saved, notifies their Secret Santa (giver) by email.
+// - On save, notifies their Secret Santa (giver) at most once per hour.
 
 require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/santa_database.php';
 $config = require __DIR__ . '/config.php';
 require __DIR__ . '/santa_draw.php';
 require __DIR__ . '/santa_wishlist.php';
@@ -31,15 +32,7 @@ $csrfToken = $_SESSION['csrf_token'];
 session_write_close();
 
 try {
-    $pdo = new PDO(
-        $config['db']['dsn'],
-        $config['db']['user'],
-        $config['db']['password'],
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
+    $pdo = santaDatabase($config);
 } catch (PDOException $e) {
     http_response_code(500);
     echo "Database connection failed.";
@@ -63,7 +56,7 @@ if ($key === '') {
 
 $stmt = $pdo->prepare("
     SELECT id, first_name, last_name, email, family_unit,
-           wish_item1, wish_item2, wish_item3, wish_items, wish_key
+           wish_items, wish_key
     FROM participants
     WHERE wish_key = :key
 ");
@@ -94,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $visit->execute([':participant_id' => $me['id'], ':year' => $year]);
     } catch (PDOException $e) {
         // Analytics must not prevent participants from using their panel.
-        error_log('Failed to record panel visit. Check that migrate-panel-visits.sql has been applied.');
+        error_log('Failed to record panel visit: ' . $e->getMessage());
     }
 }
 
@@ -147,7 +140,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $giverStmt->execute([':id' => $pair['giver_id']]);
             $giver = $giverStmt->fetch();
 
-            if ($giver && !empty($giver['email']) && !empty($giver['wish_key'])) {
+            if ($giver && !empty($giver['email']) && !empty($giver['wish_key'])
+                && santaClaimWishlistNotification($pdo, (int) $me['id'])) {
                 $mailer  = santaCreateMailer($config['smtp']);
                 $baseUrl = rtrim($config['app']['base_url'] ?? '', '/');
 
@@ -245,7 +239,7 @@ $pair = $pairStmt->fetch();
 if ($pair) {
     $recStmt = $pdo->prepare("
         SELECT id, first_name, last_name,
-               wish_item1, wish_item2, wish_item3, wish_items
+               wish_items
         FROM participants
         WHERE id = :id
     ");

@@ -3,19 +3,17 @@
 // Inject 4 test participants into the DB for development/testing.
 // Safe to run multiple times — it will not duplicate users.
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('This script can only be run from the command line.');
+}
+
 require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/santa_database.php';
 $config = require __DIR__ . '/config.php';
 
 try {
-    $pdo = new PDO(
-        $config['db']['dsn'],
-        $config['db']['user'],
-        $config['db']['password'],
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
+    $pdo = santaDatabase($config);
 } catch (PDOException $e) {
     die("DB connection failed: " . $e->getMessage() . "\n");
 }

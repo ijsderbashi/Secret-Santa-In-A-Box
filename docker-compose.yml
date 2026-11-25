@@ -30,7 +30,6 @@ services:
       SMTP_FROM_NAME: "Secret Santa Bot"
     depends_on:
       - db
-      - mailhog
     volumes:
       - ./src:/var/www/html
 
@@ -47,16 +46,6 @@ services:
     volumes:
       - db_data:/var/lib/mysql
       - ./db/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
-
-  mailhog:
-    image: mailhog/mailhog
-    container_name: secretsanta_mailhog
-    restart: unless-stopped
-    environment:
-      TZ: "America/New_York"
-    ports:
-      - "8025:8025"  # Web UI: http://localhost:8025
-    # SMTP is on port 1025 inside the Docker network
 
 volumes:
   db_data:

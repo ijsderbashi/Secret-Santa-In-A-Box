@@ -1,16 +1,8 @@
 <?php
-// Read legacy three-item lists until a participant first saves the expandable list.
+// Read, normalize, and save expandable wishlists as JSON arrays.
 function santaWishlistItems(array $participant): array
 {
-    $items = isset($participant['wish_items'])
-        ? json_decode($participant['wish_items'], true, 512, JSON_THROW_ON_ERROR)
-        : [
-            $participant['wish_item1'] ?? '',
-            $participant['wish_item2'] ?? '',
-            $participant['wish_item3'] ?? '',
-        ];
-
-    return santaNormalizeWishes($items);
+    return santaNormalizeWishes(json_decode($participant['wish_items'], true, 512, JSON_THROW_ON_ERROR));
 }
 
 function santaNormalizeWishes(array $items): array
@@ -31,17 +23,24 @@ function santaNormalizeWishes(array $items): array
 function santaSaveWishlist(PDO $pdo, int $participantId, array $items): void
 {
     $items = santaNormalizeWishes($items);
-    // Mirror the first three items for compatibility with existing integrations.
-    $update = $pdo->prepare('
-        UPDATE participants
-        SET wish_items = ?, wish_item1 = ?, wish_item2 = ?, wish_item3 = ?
-        WHERE id = ?
-    ');
+    $update = $pdo->prepare('UPDATE participants SET wish_items = ? WHERE id = ?');
     $update->execute([
         json_encode($items, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
-        $items[0] ?? null,
-        $items[1] ?? null,
-        $items[2] ?? null,
         $participantId,
     ]);
+}
+
+// Reserve the notification before SMTP so concurrent saves cannot send duplicates.
+// Failed email attempts also consume the hour; saving wishes is independent.
+function santaClaimWishlistNotification(PDO $pdo, int $participantId): bool
+{
+    $claim = $pdo->prepare('
+        UPDATE participants
+        SET wishlist_notified_at = NOW()
+        WHERE id = ?
+          AND (wishlist_notified_at IS NULL
+               OR wishlist_notified_at < NOW() - INTERVAL 1 HOUR)
+    ');
+    $claim->execute([$participantId]);
+    return $claim->rowCount() === 1;
 }

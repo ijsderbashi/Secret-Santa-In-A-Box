@@ -14,7 +14,7 @@ return [
         'password' => getenv('DB_PASSWORD') ?: 'secretsanta_pass',
     ],
     'smtp' => [
-        // For dev with MailHog, these are overridden via docker-compose env.
+        // SMTP settings are provided through the environment.
         'host'       => getenv('SMTP_HOST') ?: 'smtp.gmail.com',
         'port'       => getenv('SMTP_PORT') ?: 587,
         'username'   => getenv('SMTP_USER') ?: '', // yourgmail@gmail.com

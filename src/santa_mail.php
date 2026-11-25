@@ -24,7 +24,7 @@ function santaCreateMailer(array $smtpConfig): PHPMailer
             : PHPMailer::ENCRYPTION_STARTTLS;
         $mail->SMTPAutoTLS = true;
     } else {
-        // Local SMTP sinks such as MailHog need neither authentication nor TLS.
+        // Unauthenticated local SMTP relays need neither authentication nor TLS.
         $mail->SMTPAuth = false;
         $mail->SMTPSecure = '';
         $mail->SMTPAutoTLS = false;

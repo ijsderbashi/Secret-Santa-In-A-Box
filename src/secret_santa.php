@@ -14,7 +14,13 @@
 // - Composer autoload (vendor/autoload.php)
 // - PHPMailer via Composer (phpmailer/phpmailer)
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('This script can only be run from the command line.');
+}
+
 require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/santa_database.php';
 require __DIR__ . '/santa_draw.php';
 require __DIR__ . '/santa_mail.php';
 $config = require __DIR__ . '/config.php';
@@ -61,15 +67,7 @@ $year = santaCurrentYear($config);
 // DB connection
 // ---------------------------------------------------------
 try {
-    $pdo = new PDO(
-        $config['db']['dsn'],
-        $config['db']['user'],
-        $config['db']['password'],
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
+    $pdo = santaDatabase($config);
 } catch (PDOException $e) {
     error_log('Secret Santa DB connection failed: ' . $e->getMessage());
     exit(1);
@@ -87,8 +85,7 @@ try {
 
     $resetWishes = $pdo->prepare("
         UPDATE participants
-        SET wish_item1 = NULL, wish_item2 = NULL, wish_item3 = NULL,
-            wish_items = JSON_ARRAY(), wish_key = ?
+        SET wish_items = JSON_ARRAY(), wish_key = ?
         WHERE id = ?
     ");
     foreach ($participants as &$participant) {
@@ -112,7 +109,7 @@ try {
 // ---------------------------------------------------------
 $mailer     = santaCreateMailer($config['smtp']);
 $baseUrl    = $config['app']['base_url'] ?? '';
-$adminEmail = 'john@wizworks.net';
+$adminEmail = $config['smtp']['from_email'];
 
 // ---------------------------------------------------------
 // Build HTML email body for recipient with wishlist links

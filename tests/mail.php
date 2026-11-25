@@ -33,7 +33,7 @@ $expect($mail->SMTPSecure === 'tls', 'Port 587 must use STARTTLS.');
 
 $config['username'] = '';
 $config['password'] = '';
-$config['port'] = 1025;
+$config['port'] = 25;
 $mail = santaCreateMailer($config);
-$expect(!$mail->SMTPAuth && !$mail->SMTPAutoTLS && $mail->SMTPSecure === '', 'MailHog must use plain, unauthenticated SMTP.');
+$expect(!$mail->SMTPAuth && !$mail->SMTPAutoTLS && $mail->SMTPSecure === '', 'Local relays without credentials must use unauthenticated SMTP.');
 echo "PASS: SMTP encryption modes, authentication, and connection/command timeouts\n";

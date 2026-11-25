@@ -1,31 +1,20 @@
--- db/init-db.sql
--- Secret Santa Database Initialization Script
-
-CREATE DATABASE IF NOT EXISTS secret_santa
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
-USE secret_santa;
-
-CREATE TABLE IF NOT EXISTS participants (
+-- Current schema for a new, empty database selected by MYSQL_DATABASE.
+CREATE TABLE participants (
     id INT AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(100) NOT NULL,
     last_name  VARCHAR(100) NOT NULL,
     email      VARCHAR(255) NOT NULL,
     family_unit INT NOT NULL,
 
-    wish_item1 VARCHAR(255) NULL,
-    wish_item2 VARCHAR(255) NULL,
-    wish_item3 VARCHAR(255) NULL,
-    -- Keep in sync with migrate-expandable-wishes.sql.
-    wish_items JSON NULL,
+    wish_items JSON NOT NULL DEFAULT (JSON_ARRAY()),
+    wishlist_notified_at DATETIME NULL,
 
     wish_key   VARCHAR(64) NULL,
 
     UNIQUE KEY uniq_wish_key (wish_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS secret_santa_pairs (
+CREATE TABLE secret_santa_pairs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     year INT NOT NULL,
     giver_id INT NOT NULL,
@@ -37,25 +26,7 @@ CREATE TABLE IF NOT EXISTS secret_santa_pairs (
     INDEX idx_receiver (receiver_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Legacy email-open data is retained separately from panel visits.
-CREATE TABLE IF NOT EXISTS email_opens (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    participant_id INT NOT NULL,
-    year INT NOT NULL,
-
-    first_opened_at DATETIME NULL,
-    last_opened_at DATETIME NULL,
-
-    open_count INT NOT NULL DEFAULT 0,
-    last_ip VARCHAR(45) NULL,
-    last_user_agent VARCHAR(255) NULL,
-
-    UNIQUE KEY uniq_open (participant_id, year),
-    INDEX idx_open_year (year)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- Keep in sync with migrate-panel-visits.sql.
-CREATE TABLE IF NOT EXISTS panel_visits (
+CREATE TABLE panel_visits (
     participant_id INT NOT NULL,
     year INT NOT NULL,
     first_visited_at DATETIME NOT NULL,
@@ -66,23 +37,17 @@ CREATE TABLE IF NOT EXISTS panel_visits (
     FOREIGN KEY (participant_id) REFERENCES participants (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Keep these additions in sync with migrate-draw-settings.sql.
-CREATE TABLE IF NOT EXISTS santa_draw_settings (
+CREATE TABLE santa_draw_settings (
     id TINYINT PRIMARY KEY,
     history_years TINYINT NOT NULL CHECK (history_years BETWEEN 0 AND 5)
 ) ENGINE=InnoDB;
 
-INSERT IGNORE INTO santa_draw_settings (id, history_years) VALUES (1, 1);
+INSERT INTO santa_draw_settings (id, history_years) VALUES (1, 1);
 
-CREATE TABLE IF NOT EXISTS santa_participation (
+CREATE TABLE santa_participation (
     participant_id INT NOT NULL,
     effective_year INT NOT NULL,
     is_in BOOLEAN NOT NULL,
     PRIMARY KEY (participant_id, effective_year),
     FOREIGN KEY (participant_id) REFERENCES participants (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
-
--- Optional seed row (commented out)
--- INSERT INTO participants (first_name, last_name, email, family_unit, wish_key)
--- VALUES ('Test', 'User', 'test@example.com', 1, 'sample_key_123');
-

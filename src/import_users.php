@@ -11,6 +11,7 @@
 // - Skips emails that already exist and reports them
 
 require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/santa_database.php';
 require __DIR__ . '/santa_history_import.php';
 $config = require __DIR__ . '/config.php';
 
@@ -45,15 +46,7 @@ if ($providedKey !== $adminKey) {
 // DB connection
 // ---------------------------------------------------------
 try {
-    $pdo = new PDO(
-        $config['db']['dsn'],
-        $config['db']['user'],
-        $config['db']['password'],
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
+    $pdo = santaDatabase($config);
 } catch (PDOException $e) {
     http_response_code(500);
     echo "Database connection failed.";
@@ -96,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? null) === 'imp
                 $historyError = $e->getMessage();
             } catch (RuntimeException $e) {
                 error_log('Secret Santa history import failed: ' . $e->getMessage());
-                $historyError = 'Could not import pairings. Check that the database migration has been applied.';
+                $historyError = 'Could not import pairings. Check the server logs.';
             } finally {
                 fclose($handle);
             }

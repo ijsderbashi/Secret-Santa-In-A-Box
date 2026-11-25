@@ -6,6 +6,7 @@
 // - Shows a table of all participants, their wish lists, and panel visits.
 
 require __DIR__ . '/vendor/autoload.php'; // PHPMailer via Composer
+require __DIR__ . '/santa_database.php';
 require __DIR__ . '/santa_draw.php';
 require __DIR__ . '/santa_wishlist.php';
 require __DIR__ . '/santa_mail.php';
@@ -19,15 +20,7 @@ if (empty($_SESSION['csrf_token'])) {
 use PHPMailer\PHPMailer\Exception;
 
 try {
-    $pdo = new PDO(
-        $config['db']['dsn'],
-        $config['db']['user'],
-        $config['db']['password'],
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
+    $pdo = santaDatabase($config);
 } catch (PDOException $e) {
     die('DB connection failed: ' . htmlspecialchars($e->getMessage()));
 }
@@ -72,7 +65,7 @@ try {
 } catch (PDOException | RuntimeException $e) {
     error_log('Secret Santa settings could not be loaded: ' . $e->getMessage());
     http_response_code(500);
-    exit('Could not load draw settings. Check that the database migration has been applied.');
+    exit('Could not load draw settings. Check the server logs.');
 }
 
 $historyYears = filter_var($_POST['history_years'] ?? $savedHistoryYears, FILTER_VALIDATE_INT, [
@@ -323,11 +316,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'delete_participant') {
             $delPairs = $pdo->prepare("DELETE FROM secret_santa_pairs WHERE giver_id = ? OR receiver_id = ?");
             $delPairs->execute([$pidToDelete, $pidToDelete]);
 
-            // Delete legacy email-open stats. Panel visits cascade on participant deletion.
-            $delOpens = $pdo->prepare("DELETE FROM email_opens WHERE participant_id = :id");
-            $delOpens->execute([':id' => $pidToDelete]);
-
-            // Delete participant
+            // Panel visits and participation cascade on participant deletion.
             $delPart = $pdo->prepare("DELETE FROM participants WHERE id = :id");
             $delPart->execute([':id' => $pidToDelete]);
 
@@ -457,19 +446,14 @@ $participants = santaParticipants($pdo, $year);
 // Fetch panel visits for selected year
 // ------------------------
 $visitStats = [];
-try {
-    $stmtVisits = $pdo->prepare("
-        SELECT participant_id, first_visited_at, last_visited_at, visit_count
-        FROM panel_visits
-        WHERE year = :year
-    ");
-    $stmtVisits->execute([':year' => $year]);
-    while ($row = $stmtVisits->fetch()) {
-        $visitStats[$row['participant_id']] = $row;
-    }
-} catch (PDOException $e) {
-    $visitStats = null;
-    error_log('Failed to fetch panel visits. Check that migrate-panel-visits.sql has been applied.');
+$stmtVisits = $pdo->prepare("
+    SELECT participant_id, first_visited_at, last_visited_at, visit_count
+    FROM panel_visits
+    WHERE year = :year
+");
+$stmtVisits->execute([':year' => $year]);
+while ($row = $stmtVisits->fetch()) {
+    $visitStats[$row['participant_id']] = $row;
 }
 
 ?>
@@ -751,9 +735,6 @@ try {
 
     <!-- Wishes & panel visits table -->
     <h2>All Participants, Wish Lists & Panel Visits (Year <?php echo h($year); ?>)</h2>
-    <?php if ($visitStats === null): ?>
-        <p class="warning-text">Panel visit statistics are unavailable. Check that the panel visits database migration has been applied.</p>
-    <?php endif; ?>
     <p class="warning-text">
         Deleting a participant permanently removes their pairings from every year and their panel visit statistics,
         breaking historical continuity and removing those pairings from future repeat-recipient checks.
@@ -781,7 +762,7 @@ try {
                 $stats = $visitStats[$p['id']] ?? null;
                 $firstVisit = $stats['first_visited_at'] ?? '';
                 $lastVisit  = $stats['last_visited_at'] ?? '';
-                $visitCount = $visitStats === null ? 'Unavailable' : ($stats['visit_count'] ?? 0);
+                $visitCount = $stats['visit_count'] ?? 0;
             ?>
             <tr>
                 <td><?php echo h($idx + 1); ?></td>
