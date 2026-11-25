@@ -7,7 +7,7 @@ This bot:
 - Draws randomized Secret Santa pairings  
 - Prevents same-household assignments  
 - Now handles Wish Lists!
-- Avoids repeating last year’s pairings  
+- Can exclude repeat pairings from up to five previous calendar years
 - Sends beautiful Christmas-themed HTML emails  
 - Sends the master list privately to the admin  
 - Runs automatically every Thanksgiving Day at noon  
@@ -30,7 +30,7 @@ In other words:
 - ✨ **Wish Lists**: Participants can view their recipient's wishes and set their own.
 - 🔔 **Real-time Notifications**: Notifies givers when their recipient updates their wishlist.
 - 👾 **Email Tracking**: Track when participants open their assignment emails.
-- 🔒 **Smart Constraints**: Prevents same-family matchups and repeat pairings from last year.
+- 🔒 **Smart Constraints**: Prevents same-household matchups and can exclude repeat recipients from the previous 0–5 calendar years.
 - 🧪 **Admin Dashboard**:
   - Test and commit pairings.
   - **Manual Participant Management**: Add or delete individual participants.
@@ -38,7 +38,7 @@ In other words:
   - **Wishlist Status**: Track who has (and hasn't) filled out their wishlist.
   - **Security**: Hardened with CSRF protection and robust input validation.
 - 🗄 **Persistent Storage**: Uses MySQL for year-over-year tracking.
-- 💫 **CSV Import**: Quickly import participants in bulk.
+- 💫 **CSV Import**: Import participants and past pairings in bulk.
 
 ---
 
@@ -75,9 +75,34 @@ Modify `docker-compose.yml` to set your environment:
 docker-compose up -d --build
 ```
 
+### Upgrading an existing database
+
+For an existing Docker database volume, apply the migration before starting the updated app. From the project directory, run:
+
+```bash
+docker compose up -d db
+docker compose exec -T db sh -c 'mariadb -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' < db/migrate-draw-settings.sql
+docker compose up -d --build
+```
+
+The migration preserves your participants and pairings and can be run again safely. Fresh volumes get the schema during initialization.
+
 ### 4. Add Participants
 *   **Bulk Import**: Go to `http://yourdomain:8080/import_users.php?key=your_admin_key` to upload a CSV.
 *   **Manual Addition**: Use the "Add Single Participant" form on the Admin Dashboard.
+*   **Households**: Give unrelated participants different family unit numbers. People in the same family unit cannot draw each other.
+
+### Import past pairings
+
+On the CSV Import page, add any missing participants first, then upload a second CSV through **Import Past Pairings**.
+
+```csv
+year,giver_email,receiver_email
+2024,alice@example.com,bob@example.com
+2025,bob@example.com,alice@example.com
+```
+
+Use one row per past assignment, with the email addresses from the participant list. You can import partial records across multiple years. Identical assignments are skipped. Errors are reported by row and cancel the upload.
 
 ### 5. Automation (Cron)
 Add a cron job to your host to trigger the drawing:
@@ -93,8 +118,8 @@ Access the Admin Dashboard at:
 `http://yourdomain:8080/admin_secret_santa.php?key=your_admin_key`
 
 **Tools available:**
-- **Generate Pairings**: Test the algorithm or commit final pairings to the DB.
-- **Manage Participants**: Add new elves or remove existing ones.
+- **Generate Pairings**: Preview or commit assignments for the target year. Choose **0–5** years of history to exclude. In 2026, choosing **2** checks 2024 and 2025. Use **Save Default** to set the value used on future dashboard visits and scheduled draws.
+- **Manage Participation**: Choose a year, select **View Roster**, and use each person’s **In / Out** button. Participants start In and keep their most recent status in later years. Changes take effect on the next draw or redraw. Existing assignments stay valid until a redraw replaces them.
 - **Resend Notifications**: Use this if someone loses their original assignment email.
 - **Wishlist Status**: Monitor progress and see which elves still need to set their wishes.
 - **Force Run**: Test the full automation at any time with the `-force` flag:

@@ -5,7 +5,7 @@
 // - With no arguments, it will *only* run on Thanksgiving Day (4th Thursday in November).
 // - When run as: php secret_santa.php -force
 //   it will bypass the Thanksgiving check and run immediately.
-// - Clears all wishlist items before generating new pairings.
+// - Clears participating wishlists when a new draw is saved.
 // - Sends individual HTML emails to participants (with wishlist links + tracking pixel).
 // - Sends a master list to the admin.
 //
@@ -15,6 +15,7 @@
 // - PHPMailer via Composer (phpmailer/phpmailer)
 
 require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/santa_draw.php';
 $config = require __DIR__ . '/config.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
@@ -54,7 +55,7 @@ if (!$forceRun && !isThanksgivingToday()) {
 }
 
 // Current year
-$year = (int)date('Y');
+$year = santaCurrentYear($config);
 
 // ---------------------------------------------------------
 // DB connection
@@ -74,194 +75,37 @@ try {
     exit(1);
 }
 
-// ---------------------------------------------------------
-// Clear email open analytics for the current year
-// ---------------------------------------------------------
-try {
-    $stmt = $pdo->prepare("DELETE FROM email_opens WHERE year = :year");
-    $stmt->execute([':year' => $year]);
-    error_log("Secret Santa: Email open stats cleared for $year.");
-} catch (PDOException $e) {
-    error_log("Secret Santa: Failed to clear email open stats: " . $e->getMessage());
-    exit(1);
-}
-
-// ---------------------------------------------------------
-// Reset all wishlist items before the new drawing
-// ---------------------------------------------------------
-try {
-    $pdo->exec("
-        UPDATE participants
-        SET wish_item1 = NULL,
-            wish_item2 = NULL,
-            wish_item3 = NULL
-    ");
-    error_log("Secret Santa: All wishlist items cleared prior to drawing for $year.");
-} catch (PDOException $e) {
-    error_log("Secret Santa: Failed to clear wishlist items: " . $e->getMessage());
-    exit(1);
-}
-
-// ---------------------------------------------------------
-// Load participants (including wishlist fields and wish_key)
-// ---------------------------------------------------------
-$stmt = $pdo->query("
-    SELECT
-        id, first_name, last_name, email, family_unit,
-        wish_item1, wish_item2, wish_item3, wish_key
-    FROM participants
-    ORDER BY id ASC
-");
-$participants = $stmt->fetchAll();
-
-if (count($participants) < 2) {
-    error_log('Not enough participants to run Secret Santa.');
-    exit(1);
-}
-
-// ---------------------------------------------------------
-// Ensure each participant has a unique wish_key
-// ---------------------------------------------------------
-foreach ($participants as &$p) {
-    if (empty($p['wish_key'])) {
-        $key = bin2hex(random_bytes(16));
-        $p['wish_key'] = $key;
-
-        $upd = $pdo->prepare("UPDATE participants SET wish_key = :key WHERE id = :id");
-        $upd->execute([
-            ':key' => $key,
-            ':id'  => $p['id'],
-        ]);
-    }
-}
-unset($p); // break reference
-
-// Build lookup by id (if needed later)
-$participantsById = [];
-foreach ($participants as $p) {
-    $participantsById[$p['id']] = $p;
-}
-
-// ---------------------------------------------------------
-// Load last year's pairings (for "no same as last year" rule)
-// ---------------------------------------------------------
-$lastYear = $year - 1;
-$lastYearStmt = $pdo->prepare("SELECT giver_id, receiver_id FROM secret_santa_pairs WHERE year = :year");
-$lastYearStmt->execute([':year' => $lastYear]);
-
-$lastYearMap = []; // giver_id => receiver_id
-while ($row = $lastYearStmt->fetch()) {
-    $lastYearMap[$row['giver_id']] = $row['receiver_id'];
-}
-
-// ---------------------------------------------------------
-// Build pairings with constraints via backtracking
-// ---------------------------------------------------------
-
-/**
- * Recursive backtracking assignment.
- *
- * @param array $givers           List of participants (array of assoc arrays)
- * @param array $receivers        Remaining receivers (id => participant array)
- * @param array $lastYearMap      giver_id => receiver_id from last year
- * @param array $result           giver_id => receiver participant
- * @param int   $index            index into $givers
- * @return bool
- */
-function assignPairsRecursive(array $givers, array &$receivers, array $lastYearMap, array &$result, int $index = 0): bool
-{
-    if ($index >= count($givers)) {
-        // All givers assigned
-        return true;
-    }
-
-    $giver = $givers[$index];
-
-    // Build list of receiver keys and shuffle for randomness
-    $receiverKeys = array_keys($receivers);
-    shuffle($receiverKeys);
-
-    foreach ($receiverKeys as $rKey) {
-        $receiver = $receivers[$rKey];
-
-        // Constraint 1: cannot give to self
-        if ($receiver['id'] == $giver['id']) {
-            continue;
-        }
-
-        // Constraint 2: cannot give to same family unit
-        if ($receiver['family_unit'] == $giver['family_unit']) {
-            continue;
-        }
-
-        // Constraint 3: must be different from last year's recipient
-        if (isset($lastYearMap[$giver['id']]) && $lastYearMap[$giver['id']] == $receiver['id']) {
-            continue;
-        }
-
-        // Choose this receiver
-        $result[$giver['id']] = $receiver;
-        $chosen = $receiver;
-        unset($receivers[$rKey]);
-
-        // Recurse to next giver
-        if (assignPairsRecursive($givers, $receivers, $lastYearMap, $result, $index + 1)) {
-            return true;
-        }
-
-        // Backtrack
-        $receivers[$rKey] = $chosen;
-        unset($result[$giver['id']]);
-    }
-
-    // No valid assignment for this giver given current history
-    return false;
-}
-
-// Prepare givers / receivers arrays
-$givers    = $participants;
-$receivers = [];
-foreach ($participants as $p) {
-    $receivers[] = $p; // numeric keys okay
-}
-
-$resultPairs = []; // giver_id => receiver participant
-
-$success = assignPairsRecursive($givers, $receivers, $lastYearMap, $resultPairs);
-
-if (!$success) {
-    // Could not find valid arrangement; notify admin via log (and optionally email)
-    error_log("Secret Santa: Failed to find valid pairing for year $year. Check constraints/family units.");
-    exit(1);
-}
-
-// ---------------------------------------------------------
-// Save new pairings to DB
-//   We delete any existing rows for this year, then insert.
-// ---------------------------------------------------------
 try {
     $pdo->beginTransaction();
+    $historyYears = santaHistoryYears($pdo, true);
+    $participants = array_filter(
+        santaParticipants($pdo, $year),
+        static fn(array $participant): bool => (bool)$participant['is_in']
+    );
+    $excluded = santaExcludedRecipients($pdo, $year, $historyYears);
+    $resultPairs = santaGeneratePairs($participants, $excluded);
 
-    $del = $pdo->prepare("DELETE FROM secret_santa_pairs WHERE year = :year");
-    $del->execute([':year' => $year]);
+    $clearOpens = $pdo->prepare('DELETE FROM email_opens WHERE year = ?');
+    $clearOpens->execute([$year]);
 
-    $insert = $pdo->prepare("
-        INSERT INTO secret_santa_pairs (year, giver_id, receiver_id)
-        VALUES (:year, :giver_id, :receiver_id)
+    $resetWishes = $pdo->prepare("
+        UPDATE participants
+        SET wish_item1 = NULL, wish_item2 = NULL, wish_item3 = NULL, wish_key = ?
+        WHERE id = ?
     ");
-
-    foreach ($resultPairs as $giverId => $receiver) {
-        $insert->execute([
-            ':year'       => $year,
-            ':giver_id'   => $giverId,
-            ':receiver_id'=> $receiver['id'],
-        ]);
+    foreach ($participants as &$participant) {
+        $participant['wish_key'] = $participant['wish_key'] ?: bin2hex(random_bytes(16));
+        $resetWishes->execute([$participant['wish_key'], $participant['id']]);
     }
+    unset($participant);
 
+    santaSavePairs($pdo, $year, $resultPairs);
     $pdo->commit();
-} catch (PDOException $e) {
-    $pdo->rollBack();
-    error_log("Secret Santa: Failed to save pairings for year $year: " . $e->getMessage());
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    error_log("Secret Santa: Draw failed for {$year}: " . $e->getMessage());
     exit(1);
 }
 

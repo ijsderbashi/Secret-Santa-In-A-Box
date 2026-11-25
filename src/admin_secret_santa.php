@@ -6,6 +6,7 @@
 // - Shows a table of all participants, their wish lists, and email open stats.
 
 require __DIR__ . '/vendor/autoload.php'; // PHPMailer via Composer
+require __DIR__ . '/santa_draw.php';
 $config = require __DIR__ . '/config.php';
 
 session_start();
@@ -42,65 +43,6 @@ if (!isset($_GET['key']) || $_GET['key'] !== $ADMIN_KEY) {
 }
 
 // ------------------------
-// Helper: recursive pairing
-// ------------------------
-/**
- * Recursive backtracking assignment.
- *
- * @param array $givers           List of participants (array of assoc arrays)
- * @param array $receivers        Remaining receivers (id => participant array)
- * @param array $lastYearMap      giver_id => receiver_id from last year
- * @param array $result           giver_id => receiver participant
- * @param int   $index            index into $givers
- * @return bool
- */
-function assignPairsRecursive(array $givers, array &$receivers, array $lastYearMap, array &$result, int $index = 0): bool
-{
-    if ($index >= count($givers)) {
-        return true; // all done
-    }
-
-    $giver = $givers[$index];
-
-    $receiverKeys = array_keys($receivers);
-    shuffle($receiverKeys);
-
-    foreach ($receiverKeys as $rKey) {
-        $receiver = $receivers[$rKey];
-
-        // 1) Cannot give to self
-        if ($receiver['id'] === $giver['id']) {
-            continue;
-        }
-
-        // 2) Cannot give to same family unit
-        if ($receiver['family_unit'] === $giver['family_unit']) {
-            continue;
-        }
-
-        // 3) Cannot give to same person as last year (if present in map)
-        if (isset($lastYearMap[$giver['id']]) && $lastYearMap[$giver['id']] === $receiver['id']) {
-            continue;
-        }
-
-        // Choose this receiver
-        $result[$giver['id']] = $receiver;
-        $chosen = $receiver;
-        unset($receivers[$rKey]);
-
-        if (assignPairsRecursive($givers, $receivers, $lastYearMap, $result, $index + 1)) {
-            return true;
-        }
-
-        // Backtrack
-        $receivers[$rKey] = $chosen;
-        unset($result[$giver['id']]);
-    }
-
-    return false; // no valid choice for this giver
-}
-
-// ------------------------
 // Helper: create PHPMailer instance
 // ------------------------
 function createMailer(array $smtpConfig): PHPMailer
@@ -132,22 +74,6 @@ function createMailer(array $smtpConfig): PHPMailer
 }
 
 // ------------------------
-// Fetch participants (include wishlist fields)
-// ------------------------
-$stmt = $pdo->query("
-    SELECT
-        id, first_name, last_name, email, family_unit,
-        wish_item1, wish_item2, wish_item3, wish_key
-    FROM participants
-    ORDER BY id ASC
-");
-$participants = $stmt->fetchAll();
-
-if (count($participants) < 2) {
-    $error = 'Not enough participants in the database.';
-}
-
-// ------------------------
 // Handle form submit
 // ------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -157,17 +83,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $generatedPairs = [];
-$debugMessage   = '';
-$error          = $error ?? null;
+$debugMessage = '';
+$error = null;
+$isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
 
-$defaultYear = (int)date('Y');
-$year        = isset($_POST['year']) ? (int)$_POST['year'] : $defaultYear;
-if ($year < 2000 || $year > 2100) {
+$defaultYear = santaCurrentYear($config);
+$requestedYear = $_POST['year'] ?? $_GET['year'] ?? $defaultYear;
+$year = filter_var($requestedYear, FILTER_VALIDATE_INT, [
+    'options' => ['min_range' => SANTA_MIN_DRAW_YEAR, 'max_range' => SANTA_MAX_DRAW_YEAR],
+]);
+if ($year === false) {
+    $error = 'Choose a draw year between ' . SANTA_MIN_DRAW_YEAR . ' and ' . SANTA_MAX_DRAW_YEAR . '.';
     $year = $defaultYear;
 }
-$avoidSameAsLastYear = !empty($_POST['avoid_last_year']);
-$commitToDb          = !empty($_POST['commit_to_db']);
-$action              = $_POST['action'] ?? 'generate';
+
+try {
+    $savedHistoryYears = santaHistoryYears($pdo);
+} catch (PDOException | RuntimeException $e) {
+    error_log('Secret Santa settings could not be loaded: ' . $e->getMessage());
+    http_response_code(500);
+    exit('Could not load draw settings. Check that the database migration has been applied.');
+}
+
+$historyYears = filter_var($_POST['history_years'] ?? $savedHistoryYears, FILTER_VALIDATE_INT, [
+    'options' => ['min_range' => 0, 'max_range' => SANTA_MAX_HISTORY_YEARS],
+]);
+$commitRequested = !empty($_POST['commit_to_db']);
+$action = $_POST['action'] ?? '';
 
 // Default test email address: SMTP from_email if set
 $defaultTestEmail = $config['smtp']['from_email'] ?? '';
@@ -176,6 +118,51 @@ $testEmail        = $_POST['test_email'] ?? $defaultTestEmail;
 // Utility for HTML escaping
 function h($str) {
     return htmlspecialchars((string)$str, ENT_QUOTES, 'UTF-8');
+}
+
+if ($isPost && $action === 'save_history' && $error === null) {
+    if ($historyYears === false) {
+        $error = 'Choose a history window from 0 to 5 years.';
+    } else {
+        try {
+            $update = $pdo->prepare('UPDATE santa_draw_settings SET history_years = ? WHERE id = 1');
+            $update->execute([$historyYears]);
+            $savedHistoryYears = $historyYears;
+            $debugMessage = 'The history default was saved.';
+        } catch (PDOException $e) {
+            error_log('Secret Santa history setting could not be saved: ' . $e->getMessage());
+            $error = 'Could not save the history default.';
+        }
+    }
+}
+
+if ($isPost && $action === 'set_participation' && $error === null) {
+    $participantId = filter_var($_POST['participant_id'] ?? null, FILTER_VALIDATE_INT, [
+        'options' => ['min_range' => 1],
+    ]);
+    $status = $_POST['participation'] ?? null;
+    if ($participantId === false || !in_array($status, ['0', '1'], true)) {
+        $error = 'Choose a valid participant and participation status.';
+    } else {
+        try {
+            $pdo->beginTransaction();
+            santaHistoryYears($pdo, true);
+            $update = $pdo->prepare("
+                INSERT INTO santa_participation (participant_id, effective_year, is_in)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE is_in = VALUES(is_in)
+            ");
+            $update->execute([$participantId, $year, (int)$status]);
+            $pdo->commit();
+            $debugMessage = 'Participation updated for ' . $year . '.';
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('Secret Santa participation could not be saved: ' . $e->getMessage());
+            $error = 'Could not update participation. Check that the participant still exists.';
+        }
+    }
 }
 
 // ------------------------
@@ -206,10 +193,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add_participant') {
                 ':wish_key'    => $wishKey,
             ]);
             $debugMessage = 'Participant added successfully.';
-
-            // Refresh participants list
-            $stmt = $pdo->query("SELECT id, first_name, last_name, email, family_unit, wish_item1, wish_item2, wish_item3, wish_key FROM participants ORDER BY id ASC");
-            $participants = $stmt->fetchAll();
         } catch (PDOException $e) {
             $error = 'Failed to add participant: ' . h($e->getMessage());
         }
@@ -221,7 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add_participant') {
 // ------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'resend_email') {
     $pidToResend = isset($_POST['participant_id']) ? (int)$_POST['participant_id'] : 0;
-    if ($pidToResend > 0) {
+    if ($pidToResend > 0 && $error === null) {
         try {
             // Find assignment for current year
             $pairStmt = $pdo->prepare("SELECT receiver_id FROM secret_santa_pairs WHERE year = :year AND giver_id = :giver_id");
@@ -307,10 +290,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'delete_participant') {
     if ($pidToDelete > 0) {
         try {
             $pdo->beginTransaction();
+            santaHistoryYears($pdo, true);
 
             // Delete pairings where this participant is giver or receiver
-            $delPairs = $pdo->prepare("DELETE FROM secret_santa_pairs WHERE giver_id = :id OR receiver_id = :id");
-            $delPairs->execute([':id' => $pidToDelete]);
+            $delPairs = $pdo->prepare("DELETE FROM secret_santa_pairs WHERE giver_id = ? OR receiver_id = ?");
+            $delPairs->execute([$pidToDelete, $pidToDelete]);
 
             // Delete open stats
             $delOpens = $pdo->prepare("DELETE FROM email_opens WHERE participant_id = :id");
@@ -322,12 +306,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'delete_participant') {
 
             $pdo->commit();
             $debugMessage = 'Participant and their associated data deleted.';
-
-            // Refresh participants list
-            $stmt = $pdo->query("SELECT id, first_name, last_name, email, family_unit, wish_item1, wish_item2, wish_item3, wish_key FROM participants ORDER BY id ASC");
-            $participants = $stmt->fetchAll();
         } catch (PDOException $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             $error = 'Failed to delete participant: ' . h($e->getMessage());
         }
     }
@@ -395,88 +377,54 @@ HTML;
     }
 }
 
-// ------------------------
-// ACTION: Generate (and optionally commit) pairings
-// ------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'generate' && empty($error)) {
-
-    // Build giver/receiver arrays
-    $givers    = $participants;
-    $receivers = [];
-    foreach ($participants as $p) {
-        $receivers[] = $p;
-    }
-
-    // Load last year's pairs if requested
-    $lastYearMap = [];
-    if ($avoidSameAsLastYear && $year > 0) {
-        $lastYear = $year - 1;
-        $stmtLY = $pdo->prepare("SELECT giver_id, receiver_id FROM secret_santa_pairs WHERE year = :year");
-        $stmtLY->execute([':year' => $lastYear]);
-
-        while ($row = $stmtLY->fetch()) {
-            $lastYearMap[$row['giver_id']] = $row['receiver_id'];
-        }
-    }
-
-    $resultPairs = []; // giver_id => receiver participant
-    $success = assignPairsRecursive($givers, $receivers, $lastYearMap, $resultPairs);
-
-    if ($success) {
-        // Build display-friendly structure
-        $generatedPairs = [];
-        foreach ($participants as $giver) {
-            $giverId  = $giver['id'];
-            $receiver = $resultPairs[$giverId];
-            $generatedPairs[] = [
-                'giver_id'        => $giverId,
-                'giver_name'      => $giver['first_name'] . ' ' . $giver['last_name'],
-                'giver_family'    => $giver['family_unit'],
-                'receiver_id'     => $receiver['id'],
-                'receiver_name'   => $receiver['first_name'] . ' ' . $receiver['last_name'],
-                'receiver_family' => $receiver['family_unit'],
-                'same_as_last'    => (isset($lastYearMap[$giverId]) && $lastYearMap[$giverId] === $receiver['id']),
-            ];
-        }
-
-        // If commit option is ON, write to DB for the selected year
-        if ($commitToDb) {
-            try {
-                $pdo->beginTransaction();
-
-                // Remove any existing pairings for that year (so you can re-test)
-                $del = $pdo->prepare("DELETE FROM secret_santa_pairs WHERE year = :year");
-                $del->execute([':year' => $year]);
-
-                $ins = $pdo->prepare("
-                    INSERT INTO secret_santa_pairs (year, giver_id, receiver_id)
-                    VALUES (:year, :giver_id, :receiver_id)
-                ");
-
-                foreach ($resultPairs as $giverId => $receiver) {
-                    $ins->execute([
-                        ':year'       => $year,
-                        ':giver_id'   => $giverId,
-                        ':receiver_id'=> $receiver['id'],
-                    ]);
-                }
-
-                $pdo->commit();
-                $debugMessage = "Pairing generated and <strong>saved to DB</strong> for year {$year}. "
-                    . "You can now test 'avoid last year' using year " . ($year + 1) . ".";
-            } catch (PDOException $e) {
-                $pdo->rollBack();
-                $error = 'Failed to save pairing to DB: ' . h($e->getMessage());
-            }
-        } else {
-            $debugMessage = 'Pairing generated in <strong>TEST MODE</strong>. '
-                . 'No DB writes or emails were performed.';
-        }
+if ($isPost && $action === 'generate' && $error === null) {
+    if ($historyYears === false) {
+        $error = 'Choose a history window from 0 to 5 years.';
     } else {
-        $error = 'Failed to find a valid pairing with the current constraints. '
-               . 'Try relaxing the "avoid last year" option or double-check family units.';
+        try {
+            $pdo->beginTransaction();
+            if ($commitRequested) {
+                santaHistoryYears($pdo, true);
+            }
+            $activeParticipants = array_filter(
+                santaParticipants($pdo, $year),
+                static fn(array $participant): bool => (bool)$participant['is_in']
+            );
+            $excluded = santaExcludedRecipients($pdo, $year, $historyYears);
+            $resultPairs = santaGeneratePairs($activeParticipants, $excluded);
+
+            if ($commitRequested) {
+                santaSavePairs($pdo, $year, $resultPairs);
+            }
+            $pdo->commit();
+
+            foreach ($activeParticipants as $giver) {
+                $receiver = $resultPairs[$giver['id']];
+                $generatedPairs[] = [
+                    'giver_name'      => $giver['first_name'] . ' ' . $giver['last_name'],
+                    'giver_family'    => $giver['family_unit'],
+                    'receiver_name'   => $receiver['first_name'] . ' ' . $receiver['last_name'],
+                    'receiver_family' => $receiver['family_unit'],
+                ];
+            }
+            $debugMessage = $commitRequested
+                ? "Pairings saved for {$year}."
+                : 'Preview generated. No assignments were saved or emailed.';
+        } catch (PDOException | DomainException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if ($e instanceof DomainException) {
+                $error = h($e->getMessage());
+            } else {
+                error_log('Secret Santa draw failed: ' . $e->getMessage());
+                $error = 'Could not generate or save the draw.';
+            }
+        }
     }
 }
+
+$participants = santaParticipants($pdo, $year);
 
 // ------------------------
 // Fetch email open stats for selected year
@@ -622,11 +570,6 @@ try {
         background: #7a261e;
         color: #ffe0d0;
     }
-    .footer-note {
-        margin-top: 15px;
-        font-size: 11px;
-        color: #9fb5ff;
-    }
     .warning-text {
         font-size: 12px;
         color: #ffdddd;
@@ -674,21 +617,29 @@ try {
 
         <div>
             <label for="year">Target year:&nbsp;</label>
-            <input type="number" name="year" id="year" value="<?php echo h($year); ?>">
+            <input type="number" name="year" id="year" min="<?php echo SANTA_MIN_DRAW_YEAR; ?>"
+                   max="<?php echo SANTA_MAX_DRAW_YEAR; ?>" required value="<?php echo h($year); ?>">
+            <button type="submit" name="action" value="view_year">View Roster</button>
         </div>
         <div style="margin-top:10px;">
             <label>Budget Limit: <strong><?php echo h($config['app']['budget_limit'] ?? '$50'); ?></strong></label>
             <span class="small-note">(Change this via <code>BUDGET_LIMIT</code> environment variable)</span>
         </div>
         <div style="margin-top:10px;">
-            <label>
-                <input type="checkbox" name="avoid_last_year" <?php echo $avoidSameAsLastYear ? 'checked' : ''; ?>>
-                Avoid assigning the same recipient as last year (if last year&rsquo;s data exists)
-            </label>
+            <label for="history_years">Years of history to exclude</label>
+            <select name="history_years" id="history_years">
+                <?php for ($i = 0; $i <= SANTA_MAX_HISTORY_YEARS; $i++): ?>
+                    <option value="<?php echo $i; ?>" <?php echo ($historyYears === false ? $savedHistoryYears : $historyYears) === $i ? 'selected' : ''; ?>>
+                        <?php echo $i; ?>
+                    </option>
+                <?php endfor; ?>
+            </select>
+            <button type="submit" name="action" value="save_history">Save Default</button>
+            <div class="small-note">Saved default: <?php echo h($savedHistoryYears); ?>. The scheduled draw uses this value.</div>
         </div>
         <div style="margin-top:10px;">
             <label>
-                <input type="checkbox" name="commit_to_db" <?php echo $commitToDb ? 'checked' : ''; ?>>
+                <input type="checkbox" name="commit_to_db">
                 <strong>Commit this pairing to the database for the selected year</strong>
             </label>
             <div class="warning-text">
@@ -718,6 +669,7 @@ try {
 
     <form method="post">
         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+        <input type="hidden" name="year" value="<?php echo h($year); ?>">
         <div class="section-title">Add Single Participant</div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items: flex-end;">
             <div>
@@ -741,7 +693,7 @@ try {
             </div>
         </div>
         <div class="small-note">
-            Need to add many? Use the <a href="import_users.php?key=<?php echo h($ADMIN_KEY); ?>" style="color:#ffd700;">CSV Import</a>.
+            Need to add many? Use the <a href="import_users.php?key=<?php echo h(rawurlencode($ADMIN_KEY)); ?>" style="color:#ffd700;">CSV Import</a> for participants and past pairings.
         </div>
     </form>
 
@@ -755,7 +707,6 @@ try {
                     <th>Giver Family</th>
                     <th>Receiver</th>
                     <th>Receiver Family</th>
-                    <th>Same as Last Year?</th>
                 </tr>
             </thead>
             <tbody>
@@ -766,27 +717,10 @@ try {
                     <td><?php echo h($row['giver_family']); ?></td>
                     <td><?php echo h($row['receiver_name']); ?></td>
                     <td><?php echo h($row['receiver_family']); ?></td>
-                    <td>
-                        <?php if ($row['same_as_last']): ?>
-                            <span class="badge badge-warn">YES</span>
-                        <?php else: ?>
-                            <span class="badge badge-ok">No</span>
-                        <?php endif; ?>
-                    </td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
         </table>
-        <div class="footer-note">
-            To test the "avoid last year" logic end-to-end, you can:
-            <ol>
-                <li>Generate &amp; <strong>commit</strong> pairings for year <code>X</code>.</li>
-                <li>Then, generate pairings for year <code>X+1</code> with
-                    "avoid last year" checked and verify no giver has the same recipient twice.</li>
-            </ol>
-        </div>
-    <?php elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'generate' && empty($error)): ?>
-        <div class="footer-note">No pairings were generated.</div>
     <?php endif; ?>
 
     <!-- Wishes & open stats table -->
@@ -796,6 +730,7 @@ try {
             <tr>
                 <th>#</th>
                 <th>Name</th>
+                <th>Participation</th>
                 <th>Email</th>
                 <th>Family Unit</th>
                 <th>Wishlist Filled?</th>
@@ -816,6 +751,19 @@ try {
             <tr>
                 <td><?php echo h($idx + 1); ?></td>
                 <td><?php echo h($p['first_name'] . ' ' . $p['last_name']); ?></td>
+                <td>
+                    <form method="post" style="padding:0;background:none;margin:0;">
+                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                        <input type="hidden" name="year" value="<?php echo h($year); ?>">
+                        <input type="hidden" name="participant_id" value="<?php echo h($p['id']); ?>">
+                        <input type="hidden" name="participation" value="<?php echo $p['is_in'] ? '0' : '1'; ?>">
+                        <button type="submit" name="action" value="set_participation" aria-pressed="<?php echo $p['is_in'] ? 'true' : 'false'; ?>"
+                                aria-label="Participation for <?php echo h($p['first_name'] . ' ' . $p['last_name']); ?>"
+                                class="badge <?php echo $p['is_in'] ? 'badge-ok' : 'badge-warn'; ?>" style="margin:0;">
+                            <?php echo $p['is_in'] ? 'In' : 'Out'; ?>
+                        </button>
+                    </form>
+                </td>
                 <td><?php echo h($p['email']); ?></td>
                 <td><?php echo h($p['family_unit']); ?></td>
                 <td>
@@ -831,7 +779,8 @@ try {
                 <td style="white-space:nowrap;">
                     <form method="post" style="padding:0;background:none;margin:0;display:inline;">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                        <input type="hidden" name="participant_id" value="<?php echo $p['id']; ?>">
+                        <input type="hidden" name="year" value="<?php echo h($year); ?>">
+                        <input type="hidden" name="participant_id" value="<?php echo h($p['id']); ?>">
                         <button type="submit" name="action" value="resend_email"
                                 style="background:#006600;padding:4px 8px;font-size:11px;margin:0;">
                             Resend
@@ -839,7 +788,8 @@ try {
                     </form>
                     <form method="post" onsubmit="return confirm('Really delete this participant? This will also clear their pairings.');" style="padding:0;background:none;margin:0;display:inline;">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                        <input type="hidden" name="participant_id" value="<?php echo $p['id']; ?>">
+                        <input type="hidden" name="year" value="<?php echo h($year); ?>">
+                        <input type="hidden" name="participant_id" value="<?php echo h($p['id']); ?>">
                         <button type="submit" name="action" value="delete_participant"
                                 style="background:#b30000;padding:4px 8px;font-size:11px;margin:0;">
                             Delete

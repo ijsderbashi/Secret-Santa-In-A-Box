@@ -8,6 +8,7 @@
 
 require __DIR__ . '/vendor/autoload.php';
 $config = require __DIR__ . '/config.php';
+require __DIR__ . '/santa_draw.php';
 
 session_start();
 if (empty($_SESSION['csrf_token'])) {
@@ -98,7 +99,7 @@ if (!$me) {
     exit;
 }
 
-$year = (int)date('Y');
+$year = santaCurrentYear($config);
 $savedMessage = null;
 
 // -------------------------------------------

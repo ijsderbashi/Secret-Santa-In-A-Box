@@ -11,6 +11,7 @@
 // - Skips emails that already exist and reports them
 
 require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/santa_history_import.php';
 $config = require __DIR__ . '/config.php';
 
 session_start();
@@ -77,7 +78,33 @@ $summary = [
     'skipped'   => 0,
 ];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
+$historyResult = null;
+$historyError = null;
+$currentYear = santaCurrentYear($config);
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? null) === 'import_pairings') {
+    $file = $_FILES['history_csv'] ?? null;
+    if (!$file || $file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) {
+        $historyError = 'Choose a CSV file to upload.';
+    } else {
+        $handle = fopen($file['tmp_name'], 'r');
+        if ($handle === false) {
+            $historyError = 'Could not open the uploaded CSV.';
+        } else {
+            try {
+                $historyResult = santaImportPastPairs($pdo, $handle, $currentYear);
+            } catch (DomainException $e) {
+                $historyError = $e->getMessage();
+            } catch (RuntimeException $e) {
+                error_log('Secret Santa history import failed: ' . $e->getMessage());
+                $historyError = 'Could not import pairings. Check that the database migration has been applied.';
+            } finally {
+                fclose($handle);
+            }
+        }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? null) !== 'import_pairings' && isset($_FILES['csv_file'])) {
     $file = $_FILES['csv_file'];
 
     if ($file['error'] !== UPLOAD_ERR_OK) {
@@ -309,7 +336,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Secret Santa - Import Participants</title>
+<title>Secret Santa - CSV Import</title>
 <style>
     body {
         font-family: Arial, Helvetica, sans-serif;
@@ -416,14 +443,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
 </head>
 <body>
 <div class="container">
-    <h1>🎄 Import Secret Santa Participants 🎄</h1>
-    <div class="subtitle">
-        Upload a CSV of your elves, and we'll tuck them neatly into the database.
-    </div>
+    <h1>🎄 Secret Santa CSV Import 🎄</h1>
+    <p class="subtitle"><a href="admin_secret_santa.php?key=<?php echo h(rawurlencode($adminKey)); ?>" style="color:#ffd700;">Back to the admin dashboard</a></p>
 
     <div class="panel">
         <div class="panel-inner">
-            <h2 style="margin-top:0;color:#ffe9a4;font-size:18px;">CSV Upload</h2>
+            <h2 style="margin-top:0;color:#ffe9a4;font-size:18px;">Import Participants</h2>
             <form method="post" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                 <label for="csv_file">Choose CSV file:</label>
@@ -438,6 +463,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
 
                 <button type="submit">Import Participants 🎁</button>
             </form>
+        </div>
+    </div>
+
+    <div class="panel" style="margin-top:20px;">
+        <div class="panel-inner">
+            <h2 style="margin-top:0;color:#ffe9a4;font-size:18px;">Import Past Pairings</h2>
+            <form method="post" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                <label for="history_csv">Past pairings CSV</label>
+                <input type="file" name="history_csv" id="history_csv" accept=".csv" required>
+                <div class="note">
+                    Import participants first. List one assignment per row and use each participant’s email address.<br>
+                    <code>year,giver_email,receiver_email</code><br>
+                    <code><?php echo h($currentYear - 1); ?>,alice@example.com,bob@example.com</code>
+                </div>
+                <button type="submit" name="action" value="import_pairings">Import Past Pairings</button>
+            </form>
+            <?php if ($historyError !== null): ?>
+                <p class="status-error"><?php echo h($historyError); ?></p>
+            <?php elseif ($historyResult !== null): ?>
+                <?php if ($historyResult['errors']): ?>
+                    <p class="status-error">Import canceled. Correct these rows and upload the file again.</p>
+                    <ul>
+                        <?php foreach ($historyResult['errors'] as $row => $message): ?>
+                            <li>Row <?php echo h($row); ?>: <?php echo h($message); ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php else: ?>
+                    <p>Imported <?php echo h($historyResult['inserted']); ?>. Skipped <?php echo h($historyResult['skipped']); ?> identical pairings.</p>
+                <?php endif; ?>
+            <?php endif; ?>
         </div>
     </div>
 
