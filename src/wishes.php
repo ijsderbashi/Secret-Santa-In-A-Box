@@ -102,6 +102,25 @@ if (!$me) {
 $year = santaCurrentYear($config);
 $savedMessage = null;
 
+// Count authenticated panel page loads, excluding wishlist saves and HEAD requests.
+// Keep visits fresh even when the browser would otherwise reuse a cached page.
+header('Cache-Control: private, no-store');
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    try {
+        $visit = $pdo->prepare("
+            INSERT INTO panel_visits (participant_id, year, first_visited_at, last_visited_at, visit_count)
+            VALUES (:participant_id, :year, NOW(), NOW(), 1)
+            ON DUPLICATE KEY UPDATE
+                last_visited_at = NOW(),
+                visit_count = visit_count + 1
+        ");
+        $visit->execute([':participant_id' => $me['id'], ':year' => $year]);
+    } catch (PDOException $e) {
+        // Analytics must not prevent participants from using their panel.
+        error_log('Failed to record panel visit. Check that migrate-panel-visits.sql has been applied.');
+    }
+}
+
 // -------------------------------------------
 // Handle wishlist form submission
 // -------------------------------------------

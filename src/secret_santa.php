@@ -6,7 +6,7 @@
 // - When run as: php secret_santa.php -force
 //   it will bypass the Thanksgiving check and run immediately.
 // - Clears participating wishlists when a new draw is saved.
-// - Sends individual HTML emails to participants (with wishlist links + tracking pixel).
+// - Sends individual HTML emails to participants with wishlist links.
 // - Sends a master list to the admin.
 //
 // Requirements:
@@ -85,9 +85,6 @@ try {
     $excluded = santaExcludedRecipients($pdo, $year, $historyYears);
     $resultPairs = santaGeneratePairs($participants, $excluded);
 
-    $clearOpens = $pdo->prepare('DELETE FROM email_opens WHERE year = ?');
-    $clearOpens->execute([$year]);
-
     $resetWishes = $pdo->prepare("
         UPDATE participants
         SET wish_item1 = NULL, wish_item2 = NULL, wish_item3 = NULL, wish_key = ?
@@ -146,7 +143,7 @@ $baseUrl    = $config['app']['base_url'] ?? '';
 $adminEmail = 'john@wizworks.net';
 
 // ---------------------------------------------------------
-// Build HTML email body for recipient (with wishlist links + tracking pixel)
+// Build HTML email body for recipient with wishlist links
 // ---------------------------------------------------------
 function buildRecipientEmailHtml(array $giver, array $receiver, int $year, string $baseUrl, string $budget): string
 {
@@ -160,9 +157,6 @@ function buildRecipientEmailHtml(array $giver, array $receiver, int $year, strin
     // Two labeled links, same page with anchors
     $viewRecipientUrl = $wishlistUrl . '#recipient';
     $editOwnUrl       = $wishlistUrl . '#mine';
-
-    // Tracking pixel: logs when the email is opened
-    $pixelUrl = rtrim($baseUrl, '/') . '/open.php?pid=' . urlencode($giver['id']) . '&year=' . urlencode((string)$year);
 
     return <<<HTML
 <!DOCTYPE html>
@@ -212,8 +206,6 @@ function buildRecipientEmailHtml(array $giver, array $receiver, int $year, strin
       <p style="font-size:11px;color:#f0f0f0;margin-top:15px;">
         (This is an automated Secret Santa drawing. If you think something is wrong, contact the organizer.)
       </p>
-      <!-- invisible open-tracking pixel -->
-      <img src="{$pixelUrl}" alt="" width="1" height="1" style="display:none;opacity:0;">
     </div>
   </div>
 </body>

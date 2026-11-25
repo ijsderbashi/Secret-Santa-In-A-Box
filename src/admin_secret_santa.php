@@ -3,7 +3,7 @@
 // Admin/testing page for Secret Santa pairing.
 // - Can run in TEST mode (no DB writes) or COMMIT mode (writes to DB for selected year).
 // - Can send a test email using the configured SMTP/Gmail settings.
-// - Shows a table of all participants, their wish lists, and email open stats.
+// - Shows a table of all participants, their wish lists, and panel visits.
 
 require __DIR__ . '/vendor/autoload.php'; // PHPMailer via Composer
 require __DIR__ . '/santa_draw.php';
@@ -292,7 +292,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'resend_email') {
                     $receiverName = h($receiver['first_name'] . ' ' . $receiver['last_name']);
                     $wishKey      = urlencode($giver['wish_key']);
                     $wishlistUrl  = rtrim($baseUrl, '/') . '/wishes.php?key=' . $wishKey;
-                    $pixelUrl     = rtrim($baseUrl, '/') . '/open.php?pid=' . urlencode($giver['id']) . '&year=' . urlencode((string)$year);
                     $budget       = h($config['app']['budget_limit'] ?? '$50');
 
                     $htmlBody = <<<HTML
@@ -313,7 +312,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'resend_email') {
         <p style="font-size:13px;color:#444;margin:10px 0;">✏️ Enter or update <strong>your own</strong> wish list:<br>
           <a href="{$wishlistUrl}#mine" style="color:#b30000;font-weight:bold;">Enter My Wishes</a></p>
       </div>
-      <img src="{$pixelUrl}" alt="" width="1" height="1" style="display:none;opacity:0;">
     </div>
   </div>
 </body>
@@ -355,7 +353,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'delete_participant') {
             $delPairs = $pdo->prepare("DELETE FROM secret_santa_pairs WHERE giver_id = ? OR receiver_id = ?");
             $delPairs->execute([$pidToDelete, $pidToDelete]);
 
-            // Delete open stats
+            // Delete legacy email-open stats. Panel visits cascade on participant deletion.
             $delOpens = $pdo->prepare("DELETE FROM email_opens WHERE participant_id = :id");
             $delOpens->execute([':id' => $pidToDelete]);
 
@@ -486,23 +484,22 @@ if ($isPost && $action === 'generate' && $error === null) {
 $participants = santaParticipants($pdo, $year);
 
 // ------------------------
-// Fetch email open stats for selected year
+// Fetch panel visits for selected year
 // ------------------------
-$openStats = []; // participant_id => ['first_opened_at'=>..., 'last_opened_at'=>..., 'open_count'=>...]
+$visitStats = [];
 try {
-    $stmtOpen = $pdo->prepare("
-        SELECT participant_id, first_opened_at, last_opened_at, open_count
-        FROM email_opens
+    $stmtVisits = $pdo->prepare("
+        SELECT participant_id, first_visited_at, last_visited_at, visit_count
+        FROM panel_visits
         WHERE year = :year
     ");
-    $stmtOpen->execute([':year' => $year]);
-    while ($row = $stmtOpen->fetch()) {
-        $openStats[$row['participant_id']] = $row;
+    $stmtVisits->execute([':year' => $year]);
+    while ($row = $stmtVisits->fetch()) {
+        $visitStats[$row['participant_id']] = $row;
     }
 } catch (PDOException $e) {
-    // If this fails, we just won't show open stats (no fatal error)
-    // You could log this if you want:
-    // error_log('Failed to fetch email open stats: ' . $e->getMessage());
+    $visitStats = null;
+    error_log('Failed to fetch panel visits. Check that migrate-panel-visits.sql has been applied.');
 }
 
 ?>
@@ -782,10 +779,13 @@ try {
         </table>
     <?php endif; ?>
 
-    <!-- Wishes & open stats table -->
-    <h2>All Participants, Wish Lists & Open Stats (Year <?php echo h($year); ?>)</h2>
+    <!-- Wishes & panel visits table -->
+    <h2>All Participants, Wish Lists & Panel Visits (Year <?php echo h($year); ?>)</h2>
+    <?php if ($visitStats === null): ?>
+        <p class="warning-text">Panel visit statistics are unavailable. Check that the panel visits database migration has been applied.</p>
+    <?php endif; ?>
     <p class="warning-text">
-        Deleting a participant permanently removes their pairings from every year and their email-open statistics,
+        Deleting a participant permanently removes their pairings from every year and their panel visit statistics,
         breaking historical continuity and removing those pairings from future repeat-recipient checks.
         Prefer <strong>Edit</strong> to change their details, or mark them <strong>Out</strong> to deactivate them
         from the selected year onward while preserving history. Existing assignments remain until a redraw.
@@ -799,19 +799,19 @@ try {
                 <th>Email</th>
                 <th>Family Unit</th>
                 <th>Wishlist Filled?</th>
-                <th>First Open</th>
-                <th>Last Open</th>
-                <th>Opens</th>
+                <th>First Visit</th>
+                <th>Last Visit</th>
+                <th>Panel Visits</th>
                 <th>Manage</th>
             </tr>
         </thead>
         <tbody>
         <?php foreach ($participants as $idx => $p): ?>
             <?php
-                $stats = $openStats[$p['id']] ?? null;
-                $firstOpen = $stats['first_opened_at'] ?? '';
-                $lastOpen  = $stats['last_opened_at'] ?? '';
-                $openCount = $stats['open_count'] ?? 0;
+                $stats = $visitStats[$p['id']] ?? null;
+                $firstVisit = $stats['first_visited_at'] ?? '';
+                $lastVisit  = $stats['last_visited_at'] ?? '';
+                $visitCount = $visitStats === null ? 'Unavailable' : ($stats['visit_count'] ?? 0);
             ?>
             <tr>
                 <td><?php echo h($idx + 1); ?></td>
@@ -838,9 +838,9 @@ try {
                         <span class="badge badge-warn">No</span>
                     <?php endif; ?>
                 </td>
-                <td><?php echo h($firstOpen); ?></td>
-                <td><?php echo h($lastOpen); ?></td>
-                <td><?php echo h($openCount); ?></td>
+                <td><?php echo h($firstVisit); ?></td>
+                <td><?php echo h($lastVisit); ?></td>
+                <td><?php echo h($visitCount); ?></td>
                 <td style="white-space:nowrap;">
                     <?php
                         $editing = $editValues !== null && (int)$editValues['id'] === (int)$p['id'];
@@ -873,7 +873,7 @@ try {
                         </button>
                     </form>
                     <form method="post" onsubmit="return confirm(this.dataset.warning);"
-                          data-warning="<?php echo h('Permanently delete ' . $p['first_name'] . ' ' . $p['last_name'] . '? This removes their pairings from EVERY year and their email-open statistics, breaking historical continuity and removing those pairings from future repeat-recipient checks. Prefer editing their details or marking them Out to deactivate them while preserving history. Cancel to keep this person, or OK to permanently delete.'); ?>"
+                          data-warning="<?php echo h('Permanently delete ' . $p['first_name'] . ' ' . $p['last_name'] . '? This removes their pairings from EVERY year and their panel visit statistics, breaking historical continuity and removing those pairings from future repeat-recipient checks. Prefer editing their details or marking them Out to deactivate them while preserving history. Cancel to keep this person, or OK to permanently delete.'); ?>"
                           style="padding:0;background:none;margin:0;display:inline;">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         <input type="hidden" name="year" value="<?php echo h($year); ?>">
@@ -889,8 +889,7 @@ try {
         </tbody>
     </table>
     <div class="small-note">
-        Open stats are based on the tracking pixel in this year's Secret Santa emails and may be affected by
-        whether recipients’ mail clients load remote images.
+        Visits count panel loads and refreshes this year, excluding wishlist saves. Automated link checks may also count.
     </div>
 </div>
 </body>

@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS secret_santa_pairs (
     INDEX idx_receiver (receiver_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Legacy email-open data is retained separately from panel visits.
 CREATE TABLE IF NOT EXISTS email_opens (
     id INT AUTO_INCREMENT PRIMARY KEY,
     participant_id INT NOT NULL,
@@ -49,6 +50,18 @@ CREATE TABLE IF NOT EXISTS email_opens (
 
     UNIQUE KEY uniq_open (participant_id, year),
     INDEX idx_open_year (year)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Keep in sync with migrate-panel-visits.sql.
+CREATE TABLE IF NOT EXISTS panel_visits (
+    participant_id INT NOT NULL,
+    year INT NOT NULL,
+    first_visited_at DATETIME NOT NULL,
+    last_visited_at DATETIME NOT NULL,
+    visit_count INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (participant_id, year),
+    INDEX idx_panel_visit_year (year),
+    FOREIGN KEY (participant_id) REFERENCES participants (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Keep these additions in sync with migrate-draw-settings.sql.

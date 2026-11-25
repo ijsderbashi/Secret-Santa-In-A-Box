@@ -12,7 +12,7 @@ This bot:
 - Sends the master list privately to the admin  
 - Runs automatically every Thanksgiving Day at noon  
 - Can also be triggered manually with `-force`
-- Now includes usage analytics! (track opens!)  
+- Includes panel visit counts and first/last visit times.
 - Now is packaged to run as a Docker container
 
 In other words:
@@ -29,7 +29,7 @@ In other words:
 - 💌 **Festive Emails**: Sends individual, Christmas-themed HTML emails.
 - ✨ **Wish Lists**: Participants can view their recipient's wishes and set their own.
 - 🔔 **Real-time Notifications**: Notifies givers when their recipient updates their wishlist.
-- 👾 **Email Tracking**: Track when participants open their assignment emails.
+- 👾 **Panel Visits**: Count visits to participants' wishlist panels without email tracking images.
 - 🔒 **Smart Constraints**: Prevents same-household matchups and can exclude repeat recipients from the previous 0–5 calendar years.
 - 🧪 **Admin Dashboard**:
   - Test and commit pairings.
@@ -82,10 +82,13 @@ For an existing Docker database volume, apply the migration before starting the 
 ```bash
 docker compose up -d db
 docker compose exec -T db sh -c 'mariadb -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' < db/migrate-draw-settings.sql
+docker compose exec -T db sh -c 'mariadb -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' < db/migrate-panel-visits.sql
 docker compose up -d --build
 ```
 
-The migration preserves your participants and pairings and can be run again safely. Fresh volumes get the schema during initialization.
+The migrations preserve your participants and pairings and can be run again safely. Fresh volumes get the schema during initialization.
+
+Panel visits start at zero, separately from legacy email-open statistics. Each successful GET to `wishes.php` with a valid participant key counts one visit for the current calendar year in `APP_TZ`, including refreshes. Wishlist saves, HEAD requests, and invalid or missing keys do not count. The dashboard shows first visit, last visit, and visit count for the selected year; redraws preserve these counts. Visit timestamps use the database clock. This counts page loads, not unique people: forwarded links or automated link scanners can also add visits. No tracking images, IP addresses, or user agents are recorded by the new visit counter. The retired `open.php` endpoint returns no content and records nothing, including for previously sent emails.
 
 ### 4. Add Participants
 *   **Bulk Import**: Go to `http://yourdomain:8080/import_users.php?key=your_admin_key` to upload a CSV.
@@ -120,8 +123,8 @@ Access the Admin Dashboard at:
 **Tools available:**
 - **Generate Pairings**: Preview or commit assignments for the target year. Choose **0–5** years of history to exclude. In 2026, choosing **2** checks 2024 and 2025. Use **Save Default** to set the value used on future dashboard visits and scheduled draws.
 - **Manage Participation**: Choose a year, select **View Roster**, and use each person’s **In / Out** button. Participants start In and keep their most recent status in later years. Changes take effect on the next draw or redraw. Existing assignments stay valid until a redraw replaces them.
-- **Edit Participants**: Expand **Edit** in a participant’s Manage column to change their first name, surname, or email. Changes apply across all years, including when editing from a past year’s roster. Their identity, historical pairings, participation, household, wishlist links, and open statistics are preserved. Future emails use the updated details; saving does not send email. Use **Resend** separately if needed. Past-pairing CSV imports must use the participant’s current email address.
-- **Delete Participants**: Deletion permanently removes the participant, their pairings from every year, and their open statistics. This breaks historical continuity and removes those pairings from repeat-recipient checks. Prefer **Edit** for changed details or **Out** to deactivate someone while preserving history. A warning appears above the roster and a confirmation names the person before deletion.
+- **Edit Participants**: Expand **Edit** in a participant’s Manage column to change their first name, surname, or email. Changes apply across all years, including when editing from a past year’s roster. Their identity, historical pairings, participation, household, wishlist links, and panel visit statistics are preserved. Future emails use the updated details; saving does not send email. Use **Resend** separately if needed. Past-pairing CSV imports must use the participant’s current email address.
+- **Delete Participants**: Deletion permanently removes the participant, their pairings from every year, their panel visit statistics, and any legacy email-open statistics. This breaks historical continuity and removes those pairings from repeat-recipient checks. Prefer **Edit** for changed details or **Out** to deactivate someone while preserving history. A warning appears above the roster and a confirmation names the person before deletion.
 - **Resend Notifications**: Use this if someone loses their original assignment email.
 - **Wishlist Status**: Monitor progress and see which elves still need to set their wishes.
 - **Force Run**: Test the full automation at any time with the `-force` flag:
