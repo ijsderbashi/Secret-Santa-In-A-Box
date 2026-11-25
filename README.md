@@ -33,7 +33,7 @@ In other words:
 - 🔒 **Smart Constraints**: Prevents same-household matchups and can exclude repeat recipients from the previous 0–5 calendar years.
 - 🧪 **Admin Dashboard**:
   - Test and commit pairings.
-  - **Manual Participant Management**: Add or delete individual participants.
+  - **Manual Participant Management**: Add participants, edit their names and email addresses across all years, or delete them with a history-loss warning.
   - **Resend Emails**: Resend assignment notifications to individual participants.
   - **Wishlist Status**: Track who has (and hasn't) filled out their wishlist.
   - **Security**: Hardened with CSRF protection and robust input validation.
@@ -120,6 +120,8 @@ Access the Admin Dashboard at:
 **Tools available:**
 - **Generate Pairings**: Preview or commit assignments for the target year. Choose **0–5** years of history to exclude. In 2026, choosing **2** checks 2024 and 2025. Use **Save Default** to set the value used on future dashboard visits and scheduled draws.
 - **Manage Participation**: Choose a year, select **View Roster**, and use each person’s **In / Out** button. Participants start In and keep their most recent status in later years. Changes take effect on the next draw or redraw. Existing assignments stay valid until a redraw replaces them.
+- **Edit Participants**: Expand **Edit** in a participant’s Manage column to change their first name, surname, or email. Changes apply across all years, including when editing from a past year’s roster. Their identity, historical pairings, participation, household, wishlist links, and open statistics are preserved. Future emails use the updated details; saving does not send email. Use **Resend** separately if needed. Past-pairing CSV imports must use the participant’s current email address.
+- **Delete Participants**: Deletion permanently removes the participant, their pairings from every year, and their open statistics. This breaks historical continuity and removes those pairings from repeat-recipient checks. Prefer **Edit** for changed details or **Out** to deactivate someone while preserving history. A warning appears above the roster and a confirmation names the person before deletion.
 - **Resend Notifications**: Use this if someone loses their original assignment email.
 - **Wishlist Status**: Monitor progress and see which elves still need to set their wishes.
 - **Force Run**: Test the full automation at any time with the `-force` flag:

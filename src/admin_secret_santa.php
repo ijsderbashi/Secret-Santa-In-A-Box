@@ -166,6 +166,65 @@ if ($isPost && $action === 'set_participation' && $error === null) {
 }
 
 // ------------------------
+// ACTION: Edit participant (one identity across all years)
+// ------------------------
+$editValues = null;
+if ($isPost && $action === 'edit_participant' && $error === null) {
+    $participantId = filter_var($_POST['participant_id'] ?? null, FILTER_VALIDATE_INT, [
+        'options' => ['min_range' => 1],
+    ]);
+    $editValues = [
+        'id' => $participantId,
+        'first_name' => is_string($_POST['first_name'] ?? null) ? trim($_POST['first_name']) : '',
+        'last_name' => is_string($_POST['last_name'] ?? null) ? trim($_POST['last_name']) : '',
+        'email' => is_string($_POST['email'] ?? null) ? trim($_POST['email']) : '',
+    ];
+
+    if (!$participantId) {
+        $error = 'Choose a valid participant.';
+    } elseif ($editValues['first_name'] === '' || $editValues['email'] === '') {
+        $error = 'First name and email are required.';
+    } elseif (mb_strlen($editValues['first_name']) > 100 || mb_strlen($editValues['last_name']) > 100) {
+        $error = 'First name and last name must each be 100 characters or fewer.';
+    } elseif (strlen($editValues['email']) > 255 || !filter_var($editValues['email'], FILTER_VALIDATE_EMAIL)) {
+        $error = 'Enter a valid email address of 255 characters or fewer.';
+    } else {
+        try {
+            $pdo->beginTransaction();
+            santaHistoryYears($pdo, true);
+            $find = $pdo->prepare('SELECT email FROM participants WHERE id = ? FOR UPDATE');
+            $find->execute([$participantId]);
+            $existing = $find->fetch();
+            if (!$existing) {
+                throw new DomainException('This participant no longer exists. Refresh the roster.');
+            }
+            if (strtolower(trim($existing['email'])) !== strtolower($editValues['email'])) {
+                $duplicate = $pdo->prepare('SELECT id FROM participants WHERE LOWER(TRIM(email)) = LOWER(?) AND id <> ? LIMIT 1');
+                $duplicate->execute([$editValues['email'], $participantId]);
+                if ($duplicate->fetchColumn() !== false) {
+                    throw new DomainException('That email address is already used by another participant.');
+                }
+            }
+            $update = $pdo->prepare('UPDATE participants SET first_name = ?, last_name = ?, email = ? WHERE id = ?');
+            $update->execute([$editValues['first_name'], $editValues['last_name'], $editValues['email'], $participantId]);
+            $pdo->commit();
+            $editValues = null;
+            $debugMessage = 'Participant updated across all years. Historical pairings and participation are preserved. No email was sent.';
+        } catch (PDOException | DomainException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if ($e instanceof DomainException) {
+                $error = h($e->getMessage());
+            } else {
+                error_log('Secret Santa participant update failed: ' . $e->getMessage());
+                $error = 'Could not update the participant. Please try again.';
+            }
+        }
+    }
+}
+
+// ------------------------
 // ACTION: Add participant
 // ------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add_participant') {
@@ -725,6 +784,12 @@ try {
 
     <!-- Wishes & open stats table -->
     <h2>All Participants, Wish Lists & Open Stats (Year <?php echo h($year); ?>)</h2>
+    <p class="warning-text">
+        Deleting a participant permanently removes their pairings from every year and their email-open statistics,
+        breaking historical continuity and removing those pairings from future repeat-recipient checks.
+        Prefer <strong>Edit</strong> to change their details, or mark them <strong>Out</strong> to deactivate them
+        from the selected year onward while preserving history. Existing assignments remain until a redraw.
+    </p>
     <table>
         <thead>
             <tr>
@@ -777,6 +842,27 @@ try {
                 <td><?php echo h($lastOpen); ?></td>
                 <td><?php echo h($openCount); ?></td>
                 <td style="white-space:nowrap;">
+                    <?php
+                        $editing = $editValues !== null && (int)$editValues['id'] === (int)$p['id'];
+                        $profile = $editing ? $editValues : $p;
+                    ?>
+                    <details <?php echo $editing ? 'open' : ''; ?>>
+                        <summary>Edit <span class="small-note"><?php echo h($p['first_name'] . ' ' . $p['last_name']); ?></span></summary>
+                        <form method="post" style="white-space:normal;">
+                            <input type="hidden" name="csrf_token" value="<?php echo h($_SESSION['csrf_token']); ?>">
+                            <input type="hidden" name="year" value="<?php echo h($year); ?>">
+                            <input type="hidden" name="participant_id" value="<?php echo h($p['id']); ?>">
+                            <label for="edit_first_<?php echo h($p['id']); ?>">First Name</label><br>
+                            <input type="text" name="first_name" id="edit_first_<?php echo h($p['id']); ?>" maxlength="100" required value="<?php echo h($profile['first_name']); ?>"><br>
+                            <label for="edit_last_<?php echo h($p['id']); ?>">Last Name</label><br>
+                            <input type="text" name="last_name" id="edit_last_<?php echo h($p['id']); ?>" maxlength="100" value="<?php echo h($profile['last_name']); ?>"><br>
+                            <label for="edit_email_<?php echo h($p['id']); ?>">Email</label><br>
+                            <input type="email" name="email" id="edit_email_<?php echo h($p['id']); ?>" maxlength="255" required value="<?php echo h($profile['email']); ?>">
+                            <p class="small-note">Changes apply across all years. Pairings, participation, and wishlist links are preserved. Use Resend separately if needed.</p>
+                            <button type="submit" name="action" value="edit_participant">Save</button>
+                            <a href="?key=<?php echo h(rawurlencode($ADMIN_KEY)); ?>&amp;year=<?php echo h($year); ?>">Cancel</a>
+                        </form>
+                    </details>
                     <form method="post" style="padding:0;background:none;margin:0;display:inline;">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         <input type="hidden" name="year" value="<?php echo h($year); ?>">
@@ -786,7 +872,9 @@ try {
                             Resend
                         </button>
                     </form>
-                    <form method="post" onsubmit="return confirm('Really delete this participant? This will also clear their pairings.');" style="padding:0;background:none;margin:0;display:inline;">
+                    <form method="post" onsubmit="return confirm(this.dataset.warning);"
+                          data-warning="<?php echo h('Permanently delete ' . $p['first_name'] . ' ' . $p['last_name'] . '? This removes their pairings from EVERY year and their email-open statistics, breaking historical continuity and removing those pairings from future repeat-recipient checks. Prefer editing their details or marking them Out to deactivate them while preserving history. Cancel to keep this person, or OK to permanently delete.'); ?>"
+                          style="padding:0;background:none;margin:0;display:inline;">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         <input type="hidden" name="year" value="<?php echo h($year); ?>">
                         <input type="hidden" name="participant_id" value="<?php echo h($p['id']); ?>">
