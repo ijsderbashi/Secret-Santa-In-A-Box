@@ -16,9 +16,9 @@
 
 require __DIR__ . '/vendor/autoload.php';
 require __DIR__ . '/santa_draw.php';
+require __DIR__ . '/santa_mail.php';
 $config = require __DIR__ . '/config.php';
 
-use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
 // ---------------------------------------------------------
@@ -87,7 +87,8 @@ try {
 
     $resetWishes = $pdo->prepare("
         UPDATE participants
-        SET wish_item1 = NULL, wish_item2 = NULL, wish_item3 = NULL, wish_key = ?
+        SET wish_item1 = NULL, wish_item2 = NULL, wish_item3 = NULL,
+            wish_items = JSON_ARRAY(), wish_key = ?
         WHERE id = ?
     ");
     foreach ($participants as &$participant) {
@@ -109,36 +110,7 @@ try {
 // ---------------------------------------------------------
 // Setup mailer
 // ---------------------------------------------------------
-function createMailer(array $smtpConfig): PHPMailer
-{
-    $mail = new PHPMailer(true);
-    $mail->isSMTP();
-    $mail->Host = $smtpConfig['host'];
-    $mail->Port = $smtpConfig['port'];
-
-    if (!empty($smtpConfig['username'])) {
-        // Real SMTP (e.g., Gmail) – use auth + STARTTLS
-        $mail->SMTPAuth   = true;
-        $mail->Username   = $smtpConfig['username'];
-        $mail->Password   = $smtpConfig['password'];
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
-        $mail->SMTPAutoTLS = true;
-    } else {
-        // No username configured (e.g., MailHog dev) – no auth, no TLS
-        $mail->SMTPAuth    = false;
-        $mail->SMTPSecure  = false;
-        $mail->SMTPAutoTLS = false;
-    }
-
-    $mail->setFrom($smtpConfig['from_email'], $smtpConfig['from_name']);
-    $mail->isHTML(true);
-    $mail->CharSet = 'UTF-8';
-
-    return $mail;
-}
-
-
-$mailer     = createMailer($config['smtp']);
+$mailer     = santaCreateMailer($config['smtp']);
 $baseUrl    = $config['app']['base_url'] ?? '';
 $adminEmail = 'john@wizworks.net';
 

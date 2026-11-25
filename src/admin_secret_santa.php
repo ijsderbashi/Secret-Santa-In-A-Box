@@ -7,6 +7,8 @@
 
 require __DIR__ . '/vendor/autoload.php'; // PHPMailer via Composer
 require __DIR__ . '/santa_draw.php';
+require __DIR__ . '/santa_wishlist.php';
+require __DIR__ . '/santa_mail.php';
 $config = require __DIR__ . '/config.php';
 
 session_start();
@@ -14,7 +16,6 @@ if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
 try {
@@ -40,37 +41,6 @@ if (!isset($_GET['key']) || $_GET['key'] !== $ADMIN_KEY) {
     http_response_code(403);
     echo "Forbidden. Admin key missing or incorrect.";
     exit;
-}
-
-// ------------------------
-// Helper: create PHPMailer instance
-// ------------------------
-function createMailer(array $smtpConfig): PHPMailer
-{
-    $mail = new PHPMailer(true);
-    $mail->isSMTP();
-    $mail->Host = $smtpConfig['host'];
-    $mail->Port = $smtpConfig['port'];
-
-    if (!empty($smtpConfig['username'])) {
-        // Real SMTP (e.g., Gmail) – use auth + STARTTLS
-        $mail->SMTPAuth   = true;
-        $mail->Username   = $smtpConfig['username'];
-        $mail->Password   = $smtpConfig['password'];
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
-        $mail->SMTPAutoTLS = true;
-    } else {
-        // No username configured (e.g., MailHog dev) – no auth, no TLS
-        $mail->SMTPAuth    = false;
-        $mail->SMTPSecure  = false;
-        $mail->SMTPAutoTLS = false;
-    }
-
-    $mail->setFrom($smtpConfig['from_email'], $smtpConfig['from_name']);
-    $mail->isHTML(true);
-    $mail->CharSet = 'UTF-8';
-
-    return $mail;
 }
 
 // ------------------------
@@ -281,7 +251,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'resend_email') {
                 $receiver = $receiverStmt->fetch();
 
                 if ($giver && $receiver && !empty($giver['email'])) {
-                    $mailer = createMailer($config['smtp']);
+                    $mailer = santaCreateMailer($config['smtp']);
                     $baseUrl = $config['app']['base_url'] ?? '';
 
                     // We need a way to build the email HTML.
@@ -380,7 +350,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'test_email') {
         $error = 'Please specify a test email address.';
     } else {
         try {
-            $mailer = createMailer($GLOBALS['config']['smtp']);
+            $mailer = santaCreateMailer($GLOBALS['config']['smtp']);
 
             $mail = clone $mailer;
             $mail->clearAllRecipients();
@@ -832,7 +802,7 @@ try {
                 <td><?php echo h($p['email']); ?></td>
                 <td><?php echo h($p['family_unit']); ?></td>
                 <td>
-                    <?php if ($p['wish_item1'] || $p['wish_item2'] || $p['wish_item3']): ?>
+                    <?php if (santaWishlistItems($p)): ?>
                         <span class="badge badge-ok">Yes</span>
                     <?php else: ?>
                         <span class="badge badge-warn">No</span>

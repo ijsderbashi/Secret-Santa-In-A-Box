@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS participants (
     wish_item1 VARCHAR(255) NULL,
     wish_item2 VARCHAR(255) NULL,
     wish_item3 VARCHAR(255) NULL,
+    -- Keep in sync with migrate-expandable-wishes.sql.
+    wish_items JSON NULL,
 
     wish_key   VARCHAR(64) NULL,
 

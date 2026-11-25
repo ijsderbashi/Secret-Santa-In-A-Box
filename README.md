@@ -83,10 +83,13 @@ For an existing Docker database volume, apply the migration before starting the 
 docker compose up -d db
 docker compose exec -T db sh -c 'mariadb -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' < db/migrate-draw-settings.sql
 docker compose exec -T db sh -c 'mariadb -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' < db/migrate-panel-visits.sql
+docker compose exec -T db sh -c 'mariadb -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' < db/migrate-expandable-wishes.sql
 docker compose up -d --build
 ```
 
 The migrations preserve your participants and pairings and can be run again safely. Fresh volumes get the schema during initialization.
+
+Wishlists grow as you type: there is always an empty row at the bottom, and saving removes blank entries. Existing three-item wishlists are preserved. Each item can contain up to 255 characters. The recipient's name and wishes start hidden; use **Show** and **Hide** for privacy.
 
 Panel visits start at zero, separately from legacy email-open statistics. Each successful GET to `wishes.php` with a valid participant key counts one visit for the current calendar year in `APP_TZ`, including refreshes. Wishlist saves, HEAD requests, and invalid or missing keys do not count. The dashboard shows first visit, last visit, and visit count for the selected year; redraws preserve these counts. Visit timestamps use the database clock. This counts page loads, not unique people: forwarded links or automated link scanners can also add visits. No tracking images, IP addresses, or user agents are recorded by the new visit counter. The retired `open.php` endpoint returns no content and records nothing, including for previously sent emails.
 
