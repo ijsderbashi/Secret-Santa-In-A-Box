@@ -118,14 +118,11 @@ function buildRecipientEmailHtml(array $giver, array $receiver, int $year, strin
 {
     $giverName    = htmlspecialchars($giver['first_name'] . ' ' . $giver['last_name']);
     $receiverName = htmlspecialchars($receiver['first_name'] . ' ' . $receiver['last_name']);
+    $receiverFirstName = htmlspecialchars($receiver['first_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
     // Link for viewing recipient's wish list + editing own
     $wishKey     = urlencode($giver['wish_key']);
     $wishlistUrl = rtrim($baseUrl, '/') . '/wishes.php?key=' . $wishKey;
-
-    // Two labeled links, same page with anchors
-    $viewRecipientUrl = $wishlistUrl . '#recipient';
-    $editOwnUrl       = $wishlistUrl . '#mine';
 
     return <<<HTML
 <!DOCTYPE html>
@@ -146,7 +143,7 @@ function buildRecipientEmailHtml(array $giver, array $receiver, int $year, strin
       </p>
       <div style="background:#ffffff;border-radius:10px;padding:30px;margin:0 auto;max-width:480px;">
         <p style="font-size:14px;color:#444;margin:0 0 10px;">
-          Your Secret Santa person is:
+          Your Secret Santa recipient is:
         </p>
         <div style="font-size:30px;font-weight:bold;color:#b30000;margin:10px 0 10px;">
           {$receiverName}
@@ -157,19 +154,13 @@ function buildRecipientEmailHtml(array $giver, array $receiver, int $year, strin
         <p style="font-size:13px;color:#666;margin:10px 0 15px;">
           🎁 Please keep this a secret and bring some holiday cheer to your person! 🎁
         </p>
-        <p style="font-size:13px;color:#444;margin:10px 0;">
-          ✅ View <strong>{$receiverName}</strong>'s wish list:
-          <br>
-          <a href="{$viewRecipientUrl}" style="color:#006600;font-weight:bold;">
-            View Their Wishes
-          </a>
+        <p style="margin:12px 0;">
+          <a href="{$wishlistUrl}"
+             style="display:inline-block;background:#b30000;color:#ffffff;padding:10px 18px;border-radius:6px;
+             text-decoration:none;font-weight:bold;font-size:14px;">🎅 Your Secret Santa command centre awaits!</a>
         </p>
         <p style="font-size:13px;color:#444;margin:10px 0;">
-          ✏️ Enter or update <strong>your own</strong> wish list (up to 3 items):
-          <br>
-          <a href="{$editOwnUrl}" style="color:#b30000;font-weight:bold;">
-            Enter My Wishes
-          </a>
+          In the command centre you can find out what {$receiverFirstName} wants, help your Santa out (unless you want yet another year of chocolate), and revisit past recipients with the power of hindsight.
         </p>
       </div>
       <p style="font-size:11px;color:#f0f0f0;margin-top:15px;">
@@ -199,7 +190,7 @@ foreach ($participants as $giver) {
 
     $budget = htmlspecialchars($config['app']['budget_limit'] ?? '$50');
     $htmlBody = buildRecipientEmailHtml($giver, $receiver, $year, $baseUrl, $budget);
-    $subject  = "Your Secret Santa Person for $year 🎄";
+    $subject  = "Your Secret Santa Recipient for $year 🎄";
 
     try {
         $mail = clone $mailer; // fresh instance per send
@@ -213,9 +204,9 @@ foreach ($participants as $giver) {
         $wishlistUrl = rtrim($baseUrl, '/') . '/wishes.php?key=' . $wishKey;
 
         $mail->AltBody = "Hi {$giver['first_name']},\n\n"
-            . "Your Secret Santa person for $year is {$receiver['first_name']} {$receiver['last_name']}.\n\n"
+            . "Your Secret Santa recipient for $year is {$receiver['first_name']} {$receiver['last_name']}.\n\n"
             . "Budget Limit: {$budget}\n\n"
-            . "View their wish list and enter your own wishes here:\n$wishlistUrl\n\n"
+            . "🎅 Your Secret Santa command centre awaits! In the command centre you can find out what {$receiver['first_name']} wants, help your Santa out (unless you want yet another year of chocolate), and revisit past recipients with the power of hindsight.\n$wishlistUrl\n\n"
             . "Please keep this a secret and bring some holiday cheer!";
 
         santaAppendPairingNote($mail, $config['app']['note_to_users'] ?? '');

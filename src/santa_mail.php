@@ -57,12 +57,13 @@ function santaAssignmentEmail(array $config, array $giver, array $receiver, int 
     $escape = static fn($value) => htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     $giverName = $escape(trim($giver['first_name'] . ' ' . $giver['last_name']));
     $receiverName = $escape(trim($receiver['first_name'] . ' ' . $receiver['last_name']));
+    $receiverFirstName = $escape($receiver['first_name']);
     $budget = $escape($config['app']['budget_limit'] ?? '$50');
     $wishlistUrl = rtrim($config['app']['base_url'] ?? '', '/') . '/wishes.php?key=' . rawurlencode($giver['wish_key']);
     $htmlUrl = $escape($wishlistUrl);
     $mail = santaCreateMailer($config['smtp']);
     $mail->addAddress($giver['email'], trim($giver['first_name'] . ' ' . $giver['last_name']));
-    $mail->Subject = "Your Secret Santa Person for $year 🎄" . ($resend ? ' (Resend)' : '');
+    $mail->Subject = "Your Secret Santa Recipient for $year 🎄" . ($resend ? ' (Resend)' : '');
     $mail->Body = <<<HTML
 <!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Secret Santa $year</title></head>
@@ -72,21 +73,23 @@ function santaAssignmentEmail(array $config, array $giver, array $receiver, int 
       <h1 style="font-size:32px;margin:0 0 10px;">🎄 Secret Santa $year 🎄</h1>
       <p>Hi <strong>{$giverName}</strong>!<br>The elves have spoken...</p>
       <div style="background:#ffffff;color:#444444;border-radius:10px;padding:30px;">
-        <p>Your Secret Santa person is:</p>
+        <p>Your Secret Santa recipient is:</p>
         <div style="font-size:30px;font-weight:bold;color:#b30000;">{$receiverName}</div>
         <p><strong>💰 Budget Limit: {$budget}</strong></p>
-        <p>✅ View <strong>{$receiverName}</strong>'s wish list:<br>
-          <a href="{$htmlUrl}#recipient" style="color:#006600;font-weight:bold;">View Their Wishes</a></p>
-        <p>✏️ Enter or update <strong>your own</strong> wish list:<br>
-          <a href="{$htmlUrl}#mine" style="color:#b30000;font-weight:bold;">Enter My Wishes</a></p>
+        <p style="margin:12px 0;">
+          <a href="{$htmlUrl}"
+             style="display:inline-block;background:#b30000;color:#ffffff;padding:10px 18px;border-radius:6px;
+             text-decoration:none;font-weight:bold;font-size:14px;">🎅 Your Secret Santa command centre awaits!</a>
+        </p>
+        <p>In the command centre you can find out what {$receiverFirstName} wants, help your Santa out (unless you want yet another year of chocolate), and revisit past recipients with the power of hindsight.</p>
         <p>Please keep this a secret and bring some holiday cheer!</p>
       </div>
     </div>
   </div>
 </body></html>
 HTML;
-    $mail->AltBody = "Hi {$giver['first_name']},\n\nYour Secret Santa person for $year is {$receiver['first_name']} {$receiver['last_name']}.\n\n"
-        . 'Budget Limit: ' . ($config['app']['budget_limit'] ?? '$50') . "\n\nView their wishes and update your own here: $wishlistUrl";
+    $mail->AltBody = "Hi {$giver['first_name']},\n\nYour Secret Santa recipient for $year is {$receiver['first_name']} {$receiver['last_name']}.\n\n"
+        . 'Budget Limit: ' . ($config['app']['budget_limit'] ?? '$50') . "\n\n🎅 Your Secret Santa command centre awaits! In the command centre you can find out what {$receiver['first_name']} wants, help your Santa out (unless you want yet another year of chocolate), and revisit past recipients with the power of hindsight.\n$wishlistUrl";
     santaAppendPairingNote($mail, $config['app']['note_to_users'] ?? '');
     return $mail;
 }

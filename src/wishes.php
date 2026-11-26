@@ -148,7 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $giverName     = $giver['first_name'] . ' ' . $giver['last_name'];
                 $receiverName  = $me['first_name'] . ' ' . $me['last_name'];
-                $giverWishUrl  = $baseUrl . '/wishes.php?key=' . urlencode($giver['wish_key']) . '#recipient';
+                $giverWishUrl  = $baseUrl . '/wishes.php?key=' . urlencode($giver['wish_key']);
 
                 $subject = "New Wish List Update from {$receiverName} 🎄";
 

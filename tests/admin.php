@@ -217,7 +217,7 @@ try {
     $accessKey = $person()['wish_key'];
     $messages = $mailbox();
     check($status === 303 && $accessKey !== $oldKey && count($messages) === 10, 'Regeneration before a draw must email a replacement link.');
-    check(str_contains($messages[0]['Content']['Body'], $accessKey) && !str_contains($messages[0]['Content']['Body'], 'Your Secret Santa person for'), 'Without an assignment, email only portal access.');
+    check(str_contains($messages[0]['Content']['Body'], $accessKey) && !str_contains($messages[0]['Content']['Body'], 'Your Secret Santa recipient for'), 'Without an assignment, email only portal access.');
     [$status] = $post(['action' => 'resend_email', 'participant_id' => '1', 'year' => '2040']);
     check($status === 303 && $person()['wish_key'] === $accessKey && count($mailbox()) === 11, 'Resend without an assignment must email the current link without rotating it.');
     echo "PASS: Automatic link email before a draw exists and resend without another rotation\n";
