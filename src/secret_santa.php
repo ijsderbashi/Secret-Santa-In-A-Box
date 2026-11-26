@@ -218,6 +218,7 @@ foreach ($participants as $giver) {
             . "View their wish list and enter your own wishes here:\n$wishlistUrl\n\n"
             . "Please keep this a secret and bring some holiday cheer!";
 
+        santaAppendPairingNote($mail, $config['app']['note_to_users'] ?? '');
         $mail->send();
     } catch (Exception $e) {
         error_log("Secret Santa: Failed to send email to {$toEmail}: " . $e->getMessage());

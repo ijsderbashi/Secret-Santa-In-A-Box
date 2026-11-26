@@ -9,6 +9,8 @@ services:
     environment:
       ADMIN_KEY: "changeme"
       BUDGET_LIMIT: "30"
+      # Optional instructions appended to participant pairing emails.
+      NOTE_TO_USERS: ""
       APP_BASE_URL: "http://localhost:8080"
 
       DB_HOST: "db"

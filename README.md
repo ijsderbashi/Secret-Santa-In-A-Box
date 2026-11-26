@@ -57,6 +57,7 @@ Modify `docker-compose.yml` to set your environment:
       APP_BASE_URL: "http://yourdomain.com:8080"
       ADMIN_KEY: "choose_a_strong_password" # Secures your admin pages
       BUDGET_LIMIT: "$50" # Included in all emails
+      NOTE_TO_USERS: "" # Optional instructions in participant pairing emails
       DB_HOST: "db"
       DB_NAME: "secret_santa"
       DB_USER: "secretsanta"
@@ -72,6 +73,8 @@ Modify `docker-compose.yml` to set your environment:
 ```
 
 Set `SEND_PAIRINGS: "true"` to email the master pairing list to `SMTP_FROM_EMAIL` after a command-line draw. It defaults to `false` when omitted; only the value `true` enables it (case-insensitive). Participant assignment emails are sent regardless of this setting. Recreate the app container after changing the flag: `docker compose up -d app`.
+
+Set `NOTE_TO_USERS` to append `(Note: your instructions)` to participant pairing emails, including dashboard resends, in both HTML and plain text. For example, `NOTE_TO_USERS: "Connect to the family VPN to access your wishlist."`. It defaults to empty; omitted, empty, or whitespace-only values add nothing. Recreate the app container after changing the note: `docker compose up -d app`.
 
 ### 3. Build and Run
 ```bash
@@ -178,13 +181,13 @@ Access the Admin Dashboard at:
 ├── tests/
 │   ├── database.php            # Fresh schema, migrations, and database workflows
 │   ├── web-access.php          # Isolated HTTP allowlist and CLI guard checks
-│   └── mail.php                # SMTP encryption, authentication, and timeout checks
+│   └── mail.php                # SMTP configuration and pairing-note safety checks
 ├── participants.csv            # Example participant import
 ├── README.md                   # Setup and usage guide
 └── LICENSE                     # Project license
 ```
 
-To run the SMTP checks in the running app container:
+To run the SMTP and pairing-note safety checks in the running app container:
 
 ```bash
 docker compose exec -T app php /dev/stdin /var/www/html < tests/mail.php

@@ -24,11 +24,12 @@ return [
     ],
     'app' => [
         'send_pairings' => strtolower(trim(getenv('SEND_PAIRINGS') ?: '')) === 'true',
+        'note_to_users' => (string) getenv('NOTE_TO_USERS'),
         // Public base URL (used for links in emails)
-	'base_url' => rtrim(getenv('APP_BASE_URL') ?: 'http://localhost:8080', '/'),
-	'timezone' => getenv('APP_TZ') ?: 'America/New_York',
-	'admin_key' => getenv('ADMIN_KEY') ?: 'changeme',
-	'budget_limit' => getenv('BUDGET_LIMIT') ?: '$50',
+        'base_url' => rtrim(getenv('APP_BASE_URL') ?: 'http://localhost:8080', '/'),
+        'timezone' => getenv('APP_TZ') ?: 'America/New_York',
+        'admin_key' => getenv('ADMIN_KEY') ?: 'changeme',
+        'budget_limit' => getenv('BUDGET_LIMIT') ?: '$50',
     ],
 ];
 

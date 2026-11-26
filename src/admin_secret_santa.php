@@ -288,6 +288,7 @@ HTML;
                     $mail->Body    = $htmlBody;
                     $mail->AltBody = "Hi {$giver['first_name']},\n\nYour Secret Santa person for $year is {$receiver['first_name']} {$receiver['last_name']}.\n\nBudget Limit: {$budget}\n\nView wishes here: $wishlistUrl";
 
+                    santaAppendPairingNote($mail, $config['app']['note_to_users'] ?? '');
                     $mail->send();
                     $debugMessage = 'Assignment email resent to <strong>' . h($giver['email']) . '</strong>.';
                 } else {

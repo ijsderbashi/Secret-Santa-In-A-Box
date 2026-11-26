@@ -2,6 +2,22 @@
 
 use PHPMailer\PHPMailer\PHPMailer;
 
+function santaAppendPairingNote(PHPMailer $mail, string $note): void
+{
+    $note = trim($note);
+    if ($note === '') {
+        return;
+    }
+
+    // Treat the note only as text. Encode existing entities too, so supplied
+    // markup cannot become HTML; only our own line-break tags are inserted.
+    $escapedNote = nl2br(htmlspecialchars($note, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8', true));
+    $noteHtml = '<p style="max-width:560px;margin:0 auto 20px;padding:20px;background:#ffffff;color:#333333;border-radius:10px;font-family:Arial,Helvetica,sans-serif;font-size:13px;">'
+        . '(Note: ' . $escapedNote . ")</p>\n";
+    $mail->Body = str_replace('</body>', $noteHtml . '</body>', $mail->Body);
+    $mail->AltBody .= "\n\n(Note: {$note})";
+}
+
 function santaCreateMailer(array $smtpConfig): PHPMailer
 {
     $mail = new PHPMailer(true);
