@@ -46,7 +46,7 @@ In other words:
 
 ### 1. Clone the project files
 ```bash
-git clone https://github.com/K1WIZ/Secret-Santa-In-A-Box.git
+git clone https://github.com/ijsderbashi/Secret-Santa-In-A-Box.git
 cd Secret-Santa-In-A-Box
 ```
 
