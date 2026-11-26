@@ -7,7 +7,7 @@
 //   it will bypass the Thanksgiving check and run immediately.
 // - Clears participating wishlists when a new draw is saved.
 // - Sends individual HTML emails to participants with wishlist links.
-// - Sends a master list to the admin.
+// - Sends a master list to the admin only when SEND_PAIRINGS=true.
 //
 // Requirements:
 // - config.php in the same directory
@@ -233,6 +233,10 @@ foreach ($participants as $giver) {
 // ---------------------------------------------------------
 // Send master list to admin
 // ---------------------------------------------------------
+if (($config['app']['send_pairings'] ?? false) !== true) {
+    exit(0);
+}
+
 $rowsHtml = '';
 foreach ($masterListRows as $row) {
     $g = htmlspecialchars($row['giver']);

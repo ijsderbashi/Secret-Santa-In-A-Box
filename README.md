@@ -68,7 +68,10 @@ Modify `docker-compose.yml` to set your environment:
       SMTP_PASS: "your_app_password" # ⚠️ Use a Gmail App Password!
       SMTP_FROM_EMAIL: "santa@example.com"
       SMTP_FROM_NAME: "Secret Santa Bot"
+      SEND_PAIRINGS: "false"
 ```
+
+Set `SEND_PAIRINGS: "true"` to email the master pairing list to `SMTP_FROM_EMAIL` after a command-line draw. It defaults to `false` when omitted; only the value `true` enables it (case-insensitive). Participant assignment emails are sent regardless of this setting. Recreate the app container after changing the flag: `docker compose up -d app`.
 
 ### 3. Build and Run
 ```bash

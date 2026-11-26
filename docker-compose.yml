@@ -28,6 +28,9 @@ services:
       SMTP_PASS: ""
       SMTP_FROM_EMAIL: "santa@example.test"
       SMTP_FROM_NAME: "Secret Santa Bot"
+      
+      # Email the master pairing list to SMTP_FROM_EMAIL only when true.
+      SEND_PAIRINGS: "false"
     depends_on:
       - db
     volumes:

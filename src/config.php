@@ -23,6 +23,7 @@ return [
         'from_name'  => getenv('SMTP_FROM_NAME') ?: 'Secret Santa Bot',
     ],
     'app' => [
+        'send_pairings' => strtolower(trim(getenv('SEND_PAIRINGS') ?: '')) === 'true',
         // Public base URL (used for links in emails)
 	'base_url' => rtrim(getenv('APP_BASE_URL') ?: 'http://localhost:8080', '/'),
 	'timezone' => getenv('APP_TZ') ?: 'America/New_York',
