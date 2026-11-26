@@ -89,3 +89,32 @@ $mail->AltBody = $originalText;
 santaAppendPairingNote($mail, "Invalid UTF-8: \xC3\x28 <script>");
 $expect(str_contains($mail->Body, "Invalid UTF-8: \xEF\xBF\xBD( &lt;script&gt;"), 'Invalid UTF-8 must be replaced without losing HTML escaping.');
 echo "PASS: literal note rendering, blank notes, HTML/script escaping, invalid UTF-8, and header injection protection\n";
+
+$assignmentConfig = [
+    'smtp' => $config,
+    'app' => [
+        'base_url' => 'https://santa.example.invalid',
+        'budget_limit' => '15 EUR & cheer',
+        'note_to_users' => 'Use <your> new link.',
+    ],
+];
+$giver = ['first_name' => 'A <elf>', 'last_name' => '& Friend', 'email' => 'giver@example.invalid', 'wish_key' => str_repeat('a', 64)];
+$receiver = ['first_name' => 'B <recipient>', 'last_name' => '& Friend'];
+$mail = santaAssignmentEmail($assignmentConfig, $giver, $receiver, 2026);
+$expect(str_contains($mail->Body, 'A &lt;elf&gt; &amp; Friend') && str_contains($mail->Body, 'B &lt;recipient&gt; &amp; Friend'), 'Assignment HTML must escape participant names.');
+$expect(str_contains($mail->Body, '15 EUR &amp; cheer') && str_contains($mail->AltBody, '15 EUR & cheer'), 'Assignment budgets must be escaped only in HTML.');
+$expect(str_contains($mail->Body, '/wishes.php?key=' . $giver['wish_key'] . '#mine') && str_contains($mail->AltBody, $giver['wish_key']), 'Both assignment bodies must use the current key.');
+$expect(str_contains($mail->Body, 'Use &lt;your&gt; new link.') && str_contains($mail->AltBody, 'Use <your> new link.'), 'Draw and resend must include the configured note.');
+$expect(count($mail->getAllRecipientAddresses()) === 1 && isset($mail->getAllRecipientAddresses()['giver@example.invalid']), 'Assignments must go only to the giver.');
+$expect(!str_contains($mail->Subject, 'Resend') && $mail->preSend(), 'New assignments must build without a resend label.');
+$mail = santaAssignmentEmail($assignmentConfig, $giver, $receiver, 2026, true);
+$expect(str_contains($mail->Subject, '(Resend)') && $mail->preSend(), 'Resent assignments must use the same builder with a resend label.');
+echo "PASS: Assignment and resend recipient, current key, escaped HTML, plain text, and configured note\n";
+
+$mail = santaWishlistLinkEmail($assignmentConfig, $giver);
+$expect(str_contains($mail->Body, 'A &lt;elf&gt; &amp; Friend'), 'Access emails must escape participant names.');
+$expect(str_contains($mail->Body, '/wishes.php?key=' . $giver['wish_key']) && str_contains($mail->AltBody, $giver['wish_key']), 'Access emails must include the current link in both bodies.');
+$expect(!str_contains($mail->Body, 'Your Secret Santa person'), 'Access emails must not invent an assignment.');
+$expect(count($mail->getAllRecipientAddresses()) === 1 && isset($mail->getAllRecipientAddresses()['giver@example.invalid']), 'Access emails must go only to the participant.');
+$expect($mail->preSend(), 'Wishlist access emails must build successfully.');
+echo "PASS: Private wishlist access email, recipient, current key, and HTML escaping\n";

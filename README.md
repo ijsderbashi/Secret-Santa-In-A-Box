@@ -135,11 +135,12 @@ Access the Admin Dashboard at:
 `http://yourdomain:8080/admin_secret_santa.php?key=your_admin_key`
 
 **Tools available:**
-- **Generate Pairings**: Preview or commit assignments for the target year. Choose **0–5** years of history to exclude. In 2026, choosing **2** checks 2024 and 2025. Use **Save Default** to set the value used on future dashboard visits and scheduled draws.
-- **Manage Participation**: Choose a year, select **View Roster**, and use each person’s **In / Out** button. Participants start In and keep their most recent status in later years. Changes take effect on the next draw or redraw. Existing assignments stay valid until a redraw replaces them.
-- **Edit Participants**: Expand **Edit** in a participant’s Manage column to change their first name, surname, or email. Changes apply across all years, including when editing from a past year’s roster. Their identity, historical pairings, participation, household, wishlist links, and panel visit statistics are preserved. Future emails use the updated details; saving does not send email. Use **Resend** separately if needed. Past-pairing CSV imports must use the participant’s current email address.
-- **Delete Participants**: Deletion permanently removes the participant, their pairings from every year, their participation records, and their panel visit statistics. This breaks historical continuity and removes those pairings from repeat-recipient checks. Prefer **Edit** for changed details or **Out** to deactivate someone while preserving history. A warning appears above the roster and a confirmation names the person before deletion.
-- **Resend Notifications**: Use this if someone loses their original assignment email.
+- **Draw & Assignments**: **Test Draw** previews a random draw without saving or emailing. **Draw and Send** generates a fresh draw, saves it for the selected year, and emails every participating person after confirmation. If that year already has a draw, a second confirmation warns that all assignments for that year will be replaced and new emails sent. Cancelling either step changes nothing. Failed draw generation preserves existing assignments. Existing wish lists and other years are preserved. The result reports successful deliveries and any failures; use **Resend** for failed deliveries rather than drawing again. Choose **0–5** years of history to exclude. In 2026, choosing **2** checks 2024 and 2025. Use **Save Default** to set the value used on future dashboard visits and scheduled draws.
+- **Manage Participation**: Choose a year, select **Load Year**, and use each person’s **In / Out** switch. Participants start In and keep their most recent status in later years. Changes take effect on the next draw or redraw. Existing assignments stay valid until a redraw replaces them.
+- **Edit Participants**: Expand **Manage [name]** in a participant’s Manage column to change their first name, surname, email, or family group. Changes apply across all years, including when editing from a past year’s roster. The family group controls future draws: people in the same group cannot draw each other. Existing assignments, identity, historical pairings, participation, wishlist links, and panel visit statistics are preserved. Future emails use the updated details; saving does not send email. Use **Resend Email** separately if needed. Past-pairing CSV imports must use the participant’s current email address.
+- **Regenerate User Key**: Under **Manage → Participant actions**, regenerate the participant’s wishlist key after confirmation. Regeneration immediately invalidates the old link and automatically resends their assignment with the replacement link to their saved email address. If there is no assignment for the selected year, only a wishlist access link is emailed. Personal keys and links are never displayed in the admin panel. Wishes, assignments, participation, and visits are preserved. If delivery fails, use **Resend Email** to retry with the current key rather than regenerating it again.
+- **Delete Participants**: Under **Manage → Participant actions**, **Delete User** permanently removes the participant, their wishlist, pairings from every year, participation records, and panel visit statistics. This breaks historical continuity and removes those pairings from repeat-recipient checks. Edit their information for changed details or use **Out** to deactivate someone while preserving history. The deletion warning appears above the button and a confirmation names the person before deletion.
+- **Resend Notifications**: Under **Manage → Participant actions**, **Resend Email** asks for confirmation, then resends the saved assignment with the current wishlist link; if there is no assignment for the selected year, it sends just the wishlist access link. Save any profile changes before using participant actions, which use the saved email address.
 - **Wishlist Status**: Monitor progress and see which elves still need to set their wishes.
 - **Force Run**: Test the full automation at any time with the `-force` flag:
   ```bash
@@ -165,6 +166,7 @@ Access the Admin Dashboard at:
 ├── src/                         # Apache document root
 │   ├── config.php              # Database, SMTP, and app settings from environment
 │   ├── admin_secret_santa.php  # Roster, draw previews/commits, and email tools
+│   ├── admin_panel.php        # Admin layout, editors, and confirmation dialogs
 │   ├── import_users.php        # Participant and past-pairing CSV uploads
 │   ├── secret_santa.php        # Scheduled/forced draw and assignment emails
 │   ├── wishes.php              # Participant wishlist portal and update emails
@@ -179,6 +181,7 @@ Access the Admin Dashboard at:
 │   ├── composer.lock           # Pinned dependency versions
 │   └── vendor/                 # Composer dependencies
 ├── tests/
+│   ├── admin.php             # Isolated admin workflows and local test email delivery
 │   ├── database.php            # Fresh schema, migrations, and database workflows
 │   ├── web-access.php          # Isolated HTTP allowlist and CLI guard checks
 │   └── mail.php                # SMTP configuration and pairing-note safety checks
@@ -194,5 +197,7 @@ docker compose exec -T app php /dev/stdin /var/www/html < tests/mail.php
 ```
 
 `tests/database.php` requires PHP with PDO MySQL and mbstring, plus a disposable MariaDB 11 server. Set `DB_HOST`, `DB_PORT`, `DB_USER`, and `DB_PASSWORD` for a user allowed to create/drop test databases, then run `php tests/database.php`. It creates randomly named databases, removes them afterward, and never uses `DB_NAME`.
+
+`tests/admin.php` checks family edits, wishlist-key regeneration and revoked-link access, draw confirmations, cancellation, duplicate submissions, preserved history, and successful/failed email delivery. It starts temporary PHP web servers and creates a disposable database; it requires database credentials allowed to create/drop databases and the isolated preview's `SMTP_HOST=mailhog` (with its HTTP API at `http://mailhog:8025`). Run `php tests/admin.php`, or pass the source directory and schema SQL path as arguments when running inside a container. It removes its database and only its own test emails afterward.
 
 `tests/web-access.php` runs inside a temporary app container with the Apache allowlist installed, no network access (`--network none`), and `DB_HOST=127.0.0.1`. Run `docker exec -i CONTAINER_NAME php < tests/web-access.php` (or substitute `podman`). It checks blocked HTTP paths using GET, HEAD, and POST, the allowed pages and their private includes, and the CLI guards through a separate PHP web server. It expects database connections to fail, so do not run this check against the production container.
