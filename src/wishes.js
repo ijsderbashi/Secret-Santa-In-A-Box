@@ -1,22 +1,31 @@
-const recipientToggle = document.getElementById('toggle-recipient');
-const recipientDetails = document.getElementById('recipient-details');
+for (const [toggleId, detailsId] of [
+    ['toggle-recipient', 'recipient-details'],
+    ['toggle-history', 'history-details'],
+]) {
+    const toggle = document.getElementById(toggleId);
+    const details = document.getElementById(detailsId);
 
-if (recipientToggle && recipientDetails) {
-    function hideRecipient() {
-        recipientDetails.hidden = true;
-        recipientToggle.textContent = 'Show';
-        recipientToggle.setAttribute('aria-expanded', 'false');
+    if (toggle && details) {
+        toggle.addEventListener('click', () => {
+            const show = details.hidden;
+            details.hidden = !show;
+            toggle.textContent = show ? 'Hide' : 'Show';
+            toggle.setAttribute('aria-expanded', String(show));
+        });
     }
+}
 
-    recipientToggle.addEventListener('click', () => {
-        const show = recipientDetails.hidden;
-        recipientDetails.hidden = !show;
-        recipientToggle.textContent = show ? 'Hide' : 'Show';
-        recipientToggle.setAttribute('aria-expanded', String(show));
+const editWishlist = document.getElementById('edit-wishlist');
+const wishlistDisplay = document.getElementById('wishlist-display');
+const wishlistForm = document.getElementById('wishlist-form');
+
+if (editWishlist && wishlistDisplay && wishlistForm) {
+    editWishlist.addEventListener('click', () => {
+        wishlistDisplay.hidden = true;
+        wishlistForm.hidden = false;
+        editWishlist.setAttribute('aria-expanded', 'true');
+        wishlistForm.querySelector('input[type="text"]')?.focus();
     });
-
-    // Returning through browser history should not reveal the recipient either.
-    window.addEventListener('pageshow', hideRecipient);
 }
 
 const wishItems = document.getElementById('wish-items');

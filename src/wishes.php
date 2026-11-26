@@ -3,7 +3,8 @@
 // Participant wishlist portal:
 // - Auth: via ?key=wish_key in URL
 // - Shows recipient's wishes for the current year
-// - Allows user to edit an expandable wishlist
+// - Shows a read-only wishlist with an expandable editor
+// - Shows previous years' recipients in a collapsed draw history panel
 // - On save, notifies their Secret Santa (giver) at most once per hour.
 
 require __DIR__ . '/vendor/autoload.php';
@@ -247,6 +248,16 @@ if ($pair) {
     $recipient = $recStmt->fetch();
 }
 
+$historyStmt = $pdo->prepare("
+    SELECT pairs.year, recipient.first_name, recipient.last_name
+    FROM secret_santa_pairs AS pairs
+    LEFT JOIN participants AS recipient ON recipient.id = pairs.receiver_id
+    WHERE pairs.giver_id = :giver_id AND pairs.year < :year
+    ORDER BY pairs.year DESC, pairs.id DESC
+");
+$historyStmt->execute([':giver_id' => $me['id'], ':year' => $year]);
+$drawHistory = $historyStmt->fetchAll();
+
 $myName  = $me['first_name'] . ' ' . $me['last_name'];
 $recName = $recipient ? ($recipient['first_name'] . ' ' . $recipient['last_name']) : null;
 $myWishes = santaWishlistItems($me);
@@ -332,14 +343,25 @@ $recipientWishes = $recipient ? santaWishlistItems($recipient) : [];
         display: inline-block;
         font-style: normal;
     }
-    .recipient-heading {
+    .panel-heading {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
     }
-    .recipient-heading h2, .recipient-heading button {
+    .panel-heading h2, .panel-heading button {
         margin: 0;
+    }
+    .history-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 14px;
+        text-align: left;
+    }
+    .history-table th, .history-table td {
+        padding: 8px;
+        border-bottom: 1px solid rgba(255,255,255,0.2);
+        overflow-wrap: anywhere;
     }
     .recipient-name {
         margin: 14px 0 12px;
@@ -418,12 +440,12 @@ $recipientWishes = $recipient ? santaWishlistItems($recipient) : [];
     <div class="section" id="recipient">
         <div class="section-inner">
             <?php if ($recipient): ?>
-                <div class="recipient-heading">
+                <div class="panel-heading">
                     <h2>You are buying for</h2>
                     <button type="button" id="toggle-recipient" aria-controls="recipient-details"
-                            aria-expanded="false">Show</button>
+                            aria-expanded="true">Hide</button>
                 </div>
-                <div id="recipient-details" hidden>
+                <div id="recipient-details">
                 <h3 class="recipient-name"><?php echo h($recName); ?></h3>
                 <?php if ($recipientWishes): ?>
                     <h3>Their wishes</h3>
@@ -452,7 +474,20 @@ $recipientWishes = $recipient ? santaWishlistItems($recipient) : [];
     <div class="section" id="mine" style="margin-top:25px;">
         <div class="section-inner">
             <h2>Your Wish List</h2>
-            <form method="post">
+            <div id="wishlist-display">
+                <?php if ($myWishes): ?>
+                    <ul>
+                        <?php foreach ($myWishes as $wish): ?>
+                            <li><?php echo h($wish); ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php else: ?>
+                    <p class="empty-note">You haven't added any wishes yet.</p>
+                <?php endif; ?>
+                <button type="button" id="edit-wishlist" aria-controls="wishlist-form"
+                        aria-expanded="false">Edit wishlist</button>
+            </div>
+            <form method="post" id="wishlist-form" hidden>
                 <input type="hidden" name="csrf_token" value="<?php echo h($csrfToken); ?>">
                 <div id="wish-items">
                     <?php foreach ([...$myWishes, ''] as $index => $wish): ?>
@@ -464,12 +499,43 @@ $recipientWishes = $recipient ? santaWishlistItems($recipient) : [];
                     <?php endforeach; ?>
                 </div>
 
-                <button type="submit">Save My Wishes</button>
-
-                <?php if (!empty($savedMessage)): ?>
-                    <div class="saved-msg"><?php echo h($savedMessage); ?></div>
-                <?php endif; ?>
+                <button type="submit">Save wishlist</button>
             </form>
+            <?php if (!empty($savedMessage)): ?>
+                <div class="saved-msg" role="status"><?php echo h($savedMessage); ?></div>
+            <?php endif; ?>
+            <noscript><p class="empty-note">Enable JavaScript to edit your wishlist.</p></noscript>
+        </div>
+    </div>
+
+    <div class="section" id="draw-history">
+        <div class="section-inner">
+            <div class="panel-heading">
+                <h2>Your previous recipients</h2>
+                <button type="button" id="toggle-history" aria-controls="history-details"
+                        aria-expanded="false">Show</button>
+            </div>
+            <div id="history-details" hidden>
+            <?php if ($drawHistory): ?>
+                <table class="history-table">
+                    <thead>
+                        <tr><th scope="col">In year</th><th scope="col">You bought for</th></tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($drawHistory as $draw): ?>
+                            <tr>
+                                <td><?php echo h($draw['year']); ?></td>
+                                <td><?php echo $draw['first_name'] !== null
+                                    ? h($draw['first_name'] . ' ' . $draw['last_name'])
+                                    : 'Recipient no longer available'; ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php else: ?>
+                <p class="empty-note">You haven't bought any gifts yet.</p>
+            <?php endif; ?>
+            </div>
         </div>
     </div>
 
@@ -477,7 +543,7 @@ $recipientWishes = $recipient ? santaWishlistItems($recipient) : [];
         Your wish list is only visible to your Secret Santa (and the admin, who is pretending not to peek).
     </div>
 </div>
-<script src="wishes.js" defer></script>
+<script src="wishes.js?v=3" defer></script>
 </body>
 </html>
 
